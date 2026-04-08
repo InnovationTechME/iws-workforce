@@ -5,8 +5,10 @@ import Link from 'next/link'
 import AppShell from '../../../components/AppShell'
 import PageHeader from '../../../components/PageHeader'
 import StatusBadge from '../../../components/StatusBadge'
-import { getWorker, getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker } from '../../../lib/mockStore'
+import LetterViewer from '../../../components/LetterViewer'
+import { getWorker, getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId } from '../../../lib/mockStore'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
+import { offerLetterHTML, warningLetterHTML, experienceLetterHTML } from '../../../lib/letterTemplates'
 
 export default function WorkerDetailPage() {
   const { id } = useParams()
@@ -14,7 +16,11 @@ export default function WorkerDetailPage() {
   const [docs, setDocs] = useState([])
   const [certs, setCerts] = useState([])
   const [warnings, setWarnings] = useState([])
+  const [letters, setLetters] = useState([])
   const [tab, setTab] = useState('profile')
+  const [viewerHtml, setViewerHtml] = useState(null)
+  const [viewerRef, setViewerRef] = useState('')
+  const [letterLang, setLetterLang] = useState('english')
 
   useEffect(() => {
     const w = getWorker(id)
@@ -23,14 +29,16 @@ export default function WorkerDetailPage() {
       setDocs(getDocumentsByWorker(id))
       setCerts(getCertificationsByWorker(id))
       setWarnings(getWarningsByWorker(id))
+      setLetters(getLettersByWorker(id))
     }
   }, [id])
 
   if (!worker) return <AppShell pageTitle="Worker"><div className="page-shell"><div className="panel"><div className="empty-state"><h3>Worker not found</h3></div></div></div></AppShell>
 
   const expiredDocs = docs.filter(d => d.status === 'expired' || d.status === 'missing').length
-  const expiringDocs = docs.filter(d => d.status === 'expiring_soon').length
   const expiredCerts = certs.filter(c => c.status === 'expired').length
+  const warningLevel = getWorkerWarningLevel(id)
+  const warningBadges = { first: [{label:'1st Warning', cls:'badge-1st'}], second: [{label:'1st Warning',cls:'badge-1st'},{label:'2nd Warning',cls:'badge-2nd'}], final: [{label:'1st Warning',cls:'badge-1st'},{label:'2nd Warning',cls:'badge-2nd'},{label:'Final Warning',cls:'badge-final'}], none: [] }
 
   return (
     <AppShell pageTitle={worker.full_name}>
@@ -47,8 +55,16 @@ export default function WorkerDetailPage() {
       </div>
 
       <div className="panel">
+        {warningLevel !== 'none' && (
+          <div style={{display:'flex',gap:6,marginBottom:12}}>
+            {warningBadges[warningLevel]?.map(b => (
+              <span key={b.label} style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:600, background: b.cls==='badge-1st'?'#fef9c3': b.cls==='badge-2nd'?'#fed7aa':'#fee2e2', color: b.cls==='badge-1st'?'#854d0e': b.cls==='badge-2nd'?'#9a3412':'#991b1b'}}>{b.label}</span>
+            ))}
+          </div>
+        )}
+
         <div className="tabs">
-          {['profile','documents','certifications','warnings'].map(t => <button key={t} className={`tab${tab===t?' active':''}`} onClick={() => setTab(t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
+          {['profile','documents','certifications','warnings','letters'].map(t => <button key={t} className={`tab${tab===t?' active':''}`} onClick={() => setTab(t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
         </div>
 
         {tab === 'profile' && (
@@ -121,7 +137,85 @@ export default function WorkerDetailPage() {
             </table>
           </div>
         )}
+
+        {tab === 'letters' && (
+          <div>
+            <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+              <select className="filter-select" value={letterLang} onChange={e => setLetterLang(e.target.value)}>
+                <option value="english">English</option>
+                <option value="hindi">English + Hindi</option>
+              </select>
+              <button className="btn btn-teal btn-sm" onClick={() => {
+                const ref = generateRefNumber('offer_letter')
+                const today = new Date().toISOString().split('T')[0]
+                const html = offerLetterHTML(worker, worker, ref, today, letterLang)
+                addLetter({ id: makeId('let'), ref_number: ref, letter_type:'offer_letter', worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language: letterLang, issued_date: today, issued_by:'HR Admin', linked_record_id:null, status:'issued', notes:'' })
+                setLetters(getLettersByWorker(worker.id))
+                setViewerHtml(html); setViewerRef(ref)
+              }}>+ Offer Letter</button>
+              <button className="btn btn-secondary btn-sm" style={{borderColor:'var(--warning)',color:'var(--warning)'}} onClick={() => {
+                const nextType = getNextWarningType(worker.id)
+                const ref = generateRefNumber(nextType)
+                const today = new Date().toISOString().split('T')[0]
+                const allWarnings = getWarnings().filter(w => w.worker_id === worker.id)
+                const latestWarning = allWarnings[allWarnings.length - 1] || { reason:'Disciplinary matter', issue_date: today, issued_by:'HR Admin', penalty_amount:'', penalty_type:'' }
+                const html = warningLetterHTML(worker, latestWarning, ref, today, nextType, letterLang)
+                addLetter({ id: makeId('let'), ref_number: ref, letter_type: nextType, worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language: letterLang, issued_date: today, issued_by:'HR Admin', linked_record_id: latestWarning.id || null, status:'issued', notes:'' })
+                setLetters(getLettersByWorker(worker.id))
+                setViewerHtml(html); setViewerRef(ref)
+              }}>+ Warning Letter (auto-level)</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => {
+                const ref = generateRefNumber('experience_letter')
+                const today = new Date().toISOString().split('T')[0]
+                const html = experienceLetterHTML(worker, ref, today, letterLang)
+                addLetter({ id: makeId('let'), ref_number: ref, letter_type:'experience_letter', worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language: letterLang, issued_date: today, issued_by:'HR Admin', linked_record_id:null, status:'issued', notes:'' })
+                setLetters(getLettersByWorker(worker.id))
+                setViewerHtml(html); setViewerRef(ref)
+              }}>+ Experience Letter</button>
+            </div>
+
+            {letters.length === 0 ? (
+              <div className="empty-state"><h3>No letters issued yet</h3><p>Use the buttons above to generate letters for this worker.</p></div>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Ref number</th><th>Type</th><th>Date</th><th>Language</th><th>Issued by</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {letters.map(l => {
+                      const typeLabels = { offer_letter:'Offer Letter', warning_1st:'1st Warning', warning_2nd:'2nd Warning', warning_final:'Final Warning', experience_letter:'Experience Letter', memo:'Memo' }
+                      const toneBg = { warning_1st:'#fef9c3', warning_2nd:'#fed7aa', warning_final:'#fee2e2', offer_letter:'#f0fdf4', experience_letter:'#eff6ff', memo:'#f8fafc' }
+                      const toneColor = { warning_1st:'#854d0e', warning_2nd:'#9a3412', warning_final:'#991b1b', offer_letter:'#166534', experience_letter:'#1e40af', memo:'#475569' }
+                      return (
+                        <tr key={l.id}>
+                          <td style={{fontFamily:'monospace',fontSize:12,fontWeight:600,color:'var(--teal)'}}>{l.ref_number}</td>
+                          <td><span style={{padding:'2px 8px',borderRadius:12,fontSize:11,fontWeight:600,background:toneBg[l.letter_type]||'#f8fafc',color:toneColor[l.letter_type]||'#475569'}}>{typeLabels[l.letter_type]||l.letter_type}</span></td>
+                          <td style={{fontSize:12,color:'var(--muted)'}}>{l.issued_date}</td>
+                          <td style={{fontSize:12,color:'var(--muted)'}}>{l.language}</td>
+                          <td style={{fontSize:12,color:'var(--muted)'}}>{l.issued_by}</td>
+                          <td>
+                            <button className="btn btn-ghost btn-sm" onClick={() => {
+                              let html = ''
+                              if (l.letter_type === 'offer_letter') html = offerLetterHTML(worker, worker, l.ref_number, l.issued_date, l.language)
+                              else if (['warning_1st','warning_2nd','warning_final'].includes(l.letter_type)) {
+                                const w = getWarnings().find(w => w.id === l.linked_record_id) || { reason:'On record', issue_date: l.issued_date, issued_by: l.issued_by, penalty_amount:'', penalty_type:'' }
+                                html = warningLetterHTML(worker, w, l.ref_number, l.issued_date, l.letter_type, l.language)
+                              }
+                              else if (l.letter_type === 'experience_letter') html = experienceLetterHTML(worker, l.ref_number, l.issued_date, l.language)
+                              setViewerHtml(html); setViewerRef(l.ref_number)
+                            }}>View</button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {viewerHtml && <LetterViewer html={viewerHtml} refNumber={viewerRef} onClose={() => setViewerHtml(null)} />}
     </AppShell>
   )
 }
