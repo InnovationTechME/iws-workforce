@@ -5,8 +5,8 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { getDocuments, addDocument, makeId } from '../../lib/mockStore'
-import { formatDate, getStatusTone, getDocumentStatus } from '../../lib/utils'
+import { getDocuments, addDocument, getWorkers, makeId } from '../../lib/mockStore'
+import { formatDate, getStatusTone, getDocumentStatus, validateRequired, validateExpiryAfterIssue, validateDateNotPast } from '../../lib/utils'
 
 const DOCUMENT_TYPES = ['passport','emirates_id','visa','photo','cv','offer_letter','employment_contract','labour_contract','labour_card','labour_permit','medical_fitness','medical_insurance','workers_compensation','unemployment_insurance','bank_account_details','site_induction','safety_orientation','site_access_card','subcontractor_agreement','subcontractor_trade_licence','subcontractor_insurance','resignation_letter','termination_notice','eos_calculation','exit_clearance','final_payslip','experience_letter']
 
@@ -14,12 +14,15 @@ const CATEGORIES = ['personal','employment','compliance','site','subcontractor',
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState([])
+  const [workers, setWorkers] = useState([])
   const [queue, setQueue] = useState('expired')
   const [search, setSearch] = useState('')
   const [showDrawer, setShowDrawer] = useState(false)
-  const [form, setForm] = useState({ worker_id:'', document_category:'personal', document_type:'passport', issue_date:'', expiry_date:'', notes:'' })
+  const [formErrors, setFormErrors] = useState([])
+  const [formWarnings, setFormWarnings] = useState([])
+  const [form, setForm] = useState({ worker_id:'', document_category:'personal', document_type:'passport', issue_date:'', expiry_date:'', notes:'', file_name:null })
 
-  useEffect(() => { setDocuments(getDocuments()) }, [])
+  useEffect(() => { setDocuments(getDocuments()); setWorkers(getWorkers()) }, [])
 
   const queues = {
     missing: documents.filter(d => d.status === 'missing'),
@@ -33,11 +36,23 @@ export default function DocumentsPage() {
   const filtered = current.filter(d => !search || d.worker_id?.toLowerCase().includes(search.toLowerCase()) || d.document_type?.toLowerCase().includes(search.toLowerCase()))
 
   const handleAdd = () => {
+    const errors = validateRequired([
+      {value: form.worker_id, label:'Worker'},
+      {value: form.document_type, label:'Document type'},
+      {value: form.issue_date, label:'Issue date'},
+      {value: form.expiry_date, label:'Expiry date'},
+    ])
+    if (errors.length > 0) { setFormErrors(errors); return }
+    const dateWarn = validateExpiryAfterIssue(form.issue_date, form.expiry_date)
+    const pastWarn = validateDateNotPast(form.expiry_date, 'Expiry date')
+    setFormWarnings([dateWarn, pastWarn].filter(Boolean))
+    setFormErrors([])
     const status = getDocumentStatus(form.expiry_date, form.document_type)
-    const doc = { ...form, id: makeId('doc'), status, file_url: null, file_name: null, locked: false, unlock_reason: null }
+    const doc = { ...form, id: makeId('doc'), status, file_url: null, locked: false, unlock_reason: null }
     addDocument(doc)
     setDocuments(getDocuments())
     setShowDrawer(false)
+    setFormWarnings([])
   }
 
   return (
@@ -86,15 +101,18 @@ export default function DocumentsPage() {
       </div>
 
       {showDrawer && (
-        <DrawerForm title="Add Document" onClose={() => setShowDrawer(false)}
-          footer={<div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary" onClick={() => setShowDrawer(false)}>Cancel</button><button className="btn btn-primary" onClick={handleAdd}>Add Document</button></div>}>
+        <DrawerForm title="Add Document" onClose={() => { setShowDrawer(false); setFormErrors([]); setFormWarnings([]) }}
+          footer={<div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary" onClick={() => { setShowDrawer(false); setFormErrors([]); setFormWarnings([]) }}>Cancel</button><button className="btn btn-primary" onClick={handleAdd}>Add Document</button></div>}>
           <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            {formErrors.length > 0 && <div style={{background:'#fef2f2',border:'1px solid var(--danger)',borderRadius:6,padding:'10px 12px',display:'flex',flexDirection:'column',gap:4}}>{formErrors.map(e => <div key={e} style={{color:'var(--danger)',fontSize:12}}>⚠ {e}</div>)}</div>}
+            {formWarnings.length > 0 && <div style={{background:'var(--warning-bg)',border:'1px solid var(--warning-border)',borderRadius:6,padding:'10px 12px',display:'flex',flexDirection:'column',gap:4}}>{formWarnings.map(w => <div key={w} style={{color:'var(--warning)',fontSize:12}}>⚠ {w}</div>)}</div>}
             <div className="form-grid">
-              <div className="form-field"><label className="form-label">Worker ID</label><input className="form-input" value={form.worker_id} onChange={e => setForm({...form,worker_id:e.target.value})} placeholder="w-001" /></div>
+              <div className="form-field"><label className="form-label">Worker *</label><select className="form-select" value={form.worker_id} onChange={e => setForm({...form,worker_id:e.target.value})}><option value="">Select worker</option>{workers.map(w=><option key={w.id} value={w.id}>{w.full_name} ({w.worker_number})</option>)}</select></div>
               <div className="form-field"><label className="form-label">Category</label><select className="form-select" value={form.document_category} onChange={e => setForm({...form,document_category:e.target.value})}>{CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
-              <div className="form-field"><label className="form-label">Document type</label><select className="form-select" value={form.document_type} onChange={e => setForm({...form,document_type:e.target.value})}>{DOCUMENT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
-              <div className="form-field"><label className="form-label">Issue date</label><input className="form-input" type="date" value={form.issue_date} onChange={e => setForm({...form,issue_date:e.target.value})} /></div>
-              <div className="form-field"><label className="form-label">Expiry date</label><input className="form-input" type="date" value={form.expiry_date} onChange={e => setForm({...form,expiry_date:e.target.value})} /></div>
+              <div className="form-field"><label className="form-label">Document type *</label><select className="form-select" value={form.document_type} onChange={e => setForm({...form,document_type:e.target.value})}>{DOCUMENT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+              <div className="form-field"><label className="form-label">Issue date *</label><input className="form-input" type="date" value={form.issue_date} onChange={e => setForm({...form,issue_date:e.target.value})} /></div>
+              <div className="form-field"><label className="form-label">Expiry date *</label><input className="form-input" type="date" value={form.expiry_date} onChange={e => setForm({...form,expiry_date:e.target.value})} /></div>
+              <div className="form-field"><label className="form-label">Upload file</label><input type="file" className="form-input" onChange={e => setForm({...form, file_name: e.target.files[0]?.name || null})} />{form.file_name && <div style={{fontSize:11,color:'var(--teal)',marginTop:4}}>📎 {form.file_name}</div>}</div>
             </div>
             <div className="form-field"><label className="form-label">Notes</label><textarea className="form-textarea" value={form.notes} onChange={e => setForm({...form,notes:e.target.value})} rows={2} /></div>
           </div>

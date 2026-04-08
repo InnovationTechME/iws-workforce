@@ -17,6 +17,7 @@ export default function OnboardingPage() {
   const [showMedicalDrawer, setShowMedicalDrawer] = useState(false)
   const [showBlacklistConfirm, setShowBlacklistConfirm] = useState(false)
   const [medForm, setMedForm] = useState({ medical_date:'', medical_result:'passed', medical_notes:'' })
+  const [medErrors, setMedErrors] = useState([])
 
   useEffect(() => {
     setRecords(getOnboardingRecords())
@@ -29,6 +30,8 @@ export default function OnboardingPage() {
   }
 
   const handleMedical = () => {
+    if (!medForm.medical_date) { setMedErrors(['Medical date is required']); return }
+    setMedErrors([])
     updateOnboardingRecord(selected.id, { ...medForm, onboarding_status: medForm.medical_result === 'passed' ? 'Documentation' : 'Medical Failed' })
     if (medForm.medical_result === 'failed') {
       setShowMedicalDrawer(false)
@@ -146,7 +149,8 @@ export default function OnboardingPage() {
         <DrawerForm title="Record Medical Result" onClose={() => setShowMedicalDrawer(false)}
           footer={<div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary" onClick={() => setShowMedicalDrawer(false)}>Cancel</button><button className={`btn ${medForm.medical_result==='failed'?'btn-danger':'btn-primary'}`} onClick={handleMedical}>Save Result</button></div>}>
           <div style={{display:'flex',flexDirection:'column',gap:14}}>
-            <div className="form-field"><label className="form-label">Medical date</label><input className="form-input" type="date" value={medForm.medical_date} onChange={e => setMedForm({...medForm,medical_date:e.target.value})} /></div>
+            {medErrors.length > 0 && <div style={{background:'#fef2f2',border:'1px solid var(--danger)',borderRadius:6,padding:'10px 12px',display:'flex',flexDirection:'column',gap:4}}>{medErrors.map(e => <div key={e} style={{color:'var(--danger)',fontSize:12}}>⚠ {e}</div>)}</div>}
+            <div className="form-field"><label className="form-label">Medical date *</label><input className="form-input" type="date" value={medForm.medical_date} onChange={e => setMedForm({...medForm,medical_date:e.target.value})} /></div>
             <div className="form-field"><label className="form-label">Result</label><select className="form-select" value={medForm.medical_result} onChange={e => setMedForm({...medForm,medical_result:e.target.value})}><option value="passed">Passed — continue to documentation</option><option value="failed">Failed — close record and blacklist</option></select></div>
             {medForm.medical_result === 'failed' && <div className="notice danger" style={{fontSize:12}}>This will close the onboarding record and add the candidate to the blacklist.</div>}
             <div className="form-field"><label className="form-label">Notes</label><textarea className="form-textarea" value={medForm.medical_notes} onChange={e => setMedForm({...medForm,medical_notes:e.target.value})} rows={3} /></div>

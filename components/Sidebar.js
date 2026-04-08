@@ -11,6 +11,7 @@ const navItems = [
   { href: '/documents', label: 'Documents', module: 'documents' },
   { href: '/certifications', label: 'Certifications', module: 'certifications' },
   { href: '/timesheets', label: 'Timesheets', module: 'timesheets' },
+  { href: '/attendance', label: 'Attendance', module: 'attendance' },
   { href: '/payroll', label: 'Payroll', module: 'payroll' },
   { href: '/packs', label: 'Packs', module: 'packs' },
   { href: '/warnings', label: 'Warnings', module: 'warnings' },

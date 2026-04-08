@@ -35,7 +35,18 @@ export default function OffersPage() {
     }
   }
 
+  const [formErrors, setFormErrors] = useState([])
+
   const handleCreate = () => {
+    const errors = []
+    if (!form.candidate_name?.trim()) errors.push('Candidate name is required')
+    if (!form.position?.trim()) errors.push('Position is required')
+    if (!form.nationality?.trim()) errors.push('Nationality is required')
+    if (form.salary_type === 'monthly' && !form.salary_monthly) errors.push('Monthly salary is required')
+    if (form.salary_type === 'hourly' && !form.hourly_rate) errors.push('Hourly rate is required')
+    if (!form.start_date) errors.push('Start date is required')
+    if (errors.length > 0) { setFormErrors(errors); return }
+    setFormErrors([])
     const rates = otRates || { ot125: 0, ot150: 0 }
     const offer = { ...form, id: makeId('off'), offer_status: 'draft', salary_monthly: Number(form.salary_monthly)||0, hourly_rate: Number(form.hourly_rate)||0, fixed_allowance: Number(form.fixed_allowance)||0, ot_rate_125: rates.ot125, ot_rate_150: rates.ot150, subcontractor_billing_rate: Number(form.subcontractor_billing_rate)||0, subcontractor_cost_rate: Number(form.subcontractor_cost_rate)||0, offer_pdf_url: null, signed_offer_url: null, worker_id: null, created_at: '2026-04-08' }
     addOffer(offer)
@@ -109,6 +120,7 @@ export default function OffersPage() {
         <DrawerForm title="Create Offer Letter" subtitle="Draft a new offer for a candidate" onClose={() => setShowDrawer(false)}
           footer={<div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary" onClick={() => setShowDrawer(false)}>Cancel</button><button className="btn btn-primary" onClick={handleCreate} disabled={!!blacklistWarning}>Create Offer</button></div>}>
           <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            {formErrors.length > 0 && <div style={{background:'#fef2f2',border:'1px solid var(--danger)',borderRadius:6,padding:'10px 12px',display:'flex',flexDirection:'column',gap:4}}>{formErrors.map(e => <div key={e} style={{color:'var(--danger)',fontSize:12}}>⚠ {e}</div>)}</div>}
             {blacklistWarning && <div className="notice danger"><strong>Blacklist match:</strong> {blacklistWarning.full_name} — {blacklistWarning.reason}</div>}
             <div className="form-grid">
               <div className="form-field"><label className="form-label">Candidate name *</label><input className="form-input" value={form.candidate_name} onChange={e => setForm({...form, candidate_name:e.target.value})} /></div>

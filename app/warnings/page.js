@@ -4,8 +4,8 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { getWarnings, addWarning, updateWarning, getWorkers, makeId } from '../../lib/mockStore'
-import { formatDate, getStatusTone } from '../../lib/utils'
+import { getWarnings, addWarning, updateWarning, getWorkers, addPenaltyDeduction, makeId } from '../../lib/mockStore'
+import { formatDate, getStatusTone, TODAY } from '../../lib/utils'
 
 export default function WarningsPage() {
   const [warnings, setWarnings] = useState([])
@@ -13,15 +13,33 @@ export default function WarningsPage() {
   const [filter, setFilter] = useState('all')
   const [selected, setSelected] = useState(null)
   const [showDrawer, setShowDrawer] = useState(false)
-  const [form, setForm] = useState({ worker_id:'', warning_type:'warning', issue_date:'2026-04-08', reason:'', issued_by:'', status:'open', notes:'' })
+  const [formErrors, setFormErrors] = useState([])
+  const [form, setForm] = useState({ worker_id:'', warning_type:'warning', issue_date:'2026-04-08', reason:'', issued_by:'', status:'open', notes:'', penalty_amount:'', penalty_type:'' })
 
   useEffect(() => { setWarnings(getWarnings()); setWorkers(getWorkers()) }, [])
 
   const filtered = filter === 'all' ? warnings : warnings.filter(w => w.status === filter)
 
   const handleAdd = () => {
+    if (!form.reason || !form.reason.trim()) { setFormErrors(['Reason is required']); return }
+    setFormErrors([])
     const worker = workers.find(w => w.id === form.worker_id)
-    addWarning({ ...form, id: makeId('wm'), worker_name: worker?.full_name || '', worker_number: worker?.worker_number || '' })
+    const newWarningId = makeId('wm')
+    addWarning({ ...form, id: newWarningId, worker_name: worker?.full_name || '', worker_number: worker?.worker_number || '' })
+    if (form.penalty_amount && form.penalty_type) {
+      addPenaltyDeduction({
+        id: makeId('pd'),
+        warning_id: newWarningId,
+        worker_id: form.worker_id,
+        worker_name: worker?.full_name || '',
+        worker_number: worker?.worker_number || '',
+        label: `Warning penalty — ${form.reason?.slice(0,40)}`,
+        amount: Number(form.penalty_amount),
+        type: form.penalty_type,
+        status: 'pending_hr_confirmation',
+        created_at: TODAY
+      })
+    }
     setWarnings(getWarnings())
     setShowDrawer(false)
   }
@@ -79,9 +97,10 @@ export default function WarningsPage() {
       </div>
 
       {showDrawer && (
-        <DrawerForm title="Create Warning or Memo" onClose={() => setShowDrawer(false)}
-          footer={<div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary" onClick={() => setShowDrawer(false)}>Cancel</button><button className="btn btn-primary" onClick={handleAdd}>Create Record</button></div>}>
+        <DrawerForm title="Create Warning or Memo" onClose={() => { setShowDrawer(false); setFormErrors([]) }}
+          footer={<div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary" onClick={() => { setShowDrawer(false); setFormErrors([]) }}>Cancel</button><button className="btn btn-primary" onClick={handleAdd}>Create Record</button></div>}>
           <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            {formErrors.length > 0 && <div style={{background:'#fef2f2',border:'1px solid var(--danger)',borderRadius:6,padding:'10px 12px',display:'flex',flexDirection:'column',gap:4}}>{formErrors.map(e => <div key={e} style={{color:'var(--danger)',fontSize:12}}>⚠ {e}</div>)}</div>}
             <div className="form-grid">
               <div className="form-field"><label className="form-label">Worker</label><select className="form-select" value={form.worker_id} onChange={e => setForm({...form,worker_id:e.target.value})}><option value="">Select worker</option>{workers.map(w=><option key={w.id} value={w.id}>{w.full_name}</option>)}</select></div>
               <div className="form-field"><label className="form-label">Type</label><select className="form-select" value={form.warning_type} onChange={e => setForm({...form,warning_type:e.target.value})}><option value="warning">Warning</option><option value="memo">Memo</option></select></div>
@@ -90,6 +109,10 @@ export default function WarningsPage() {
               <div className="form-field"><label className="form-label">Status</label><select className="form-select" value={form.status} onChange={e => setForm({...form,status:e.target.value})}><option value="open">Open</option><option value="monitoring">Monitoring</option><option value="closed">Closed</option></select></div>
             </div>
             <div className="form-field"><label className="form-label">Reason *</label><textarea className="form-textarea" value={form.reason} onChange={e => setForm({...form,reason:e.target.value})} rows={3} placeholder="Describe the incident or reason for the record" /></div>
+            <div className="form-grid">
+              <div className="form-field"><label className="form-label">Penalty amount (AED)</label><input className="form-input" type="number" step="0.01" value={form.penalty_amount} onChange={e => setForm({...form,penalty_amount:e.target.value})} placeholder="0.00 — leave blank for no penalty" /></div>
+              <div className="form-field"><label className="form-label">Penalty type</label><select className="form-select" value={form.penalty_type} onChange={e => setForm({...form,penalty_type:e.target.value})}><option value="">No penalty</option><option value="deduction">One-off deduction</option><option value="advance_recovery">Advance recovery</option></select></div>
+            </div>
             <div className="form-field"><label className="form-label">Notes</label><textarea className="form-textarea" value={form.notes} onChange={e => setForm({...form,notes:e.target.value})} rows={2} /></div>
           </div>
         </DrawerForm>

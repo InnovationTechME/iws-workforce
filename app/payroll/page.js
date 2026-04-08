@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
-import { getPayrollBatch, getPayrollLines, updatePayrollBatch, getPayrollLine, addPayrollAdjustment, updatePayrollLine } from '../../lib/mockStore'
+import { getPayrollBatch, getPayrollLines, updatePayrollBatch, getPayrollLine, addPayrollAdjustment, updatePayrollLine, getPenaltyDeductions, confirmPenaltyDeduction, removePenaltyDeduction } from '../../lib/mockStore'
 import { formatCurrency, getStatusTone } from '../../lib/utils'
 import { canAccess } from '../../lib/mockAuth'
 
@@ -13,10 +13,12 @@ export default function PayrollPage() {
   const [selected, setSelected] = useState(null)
   const [tab, setTab] = useState('all')
   const [adjForm, setAdjForm] = useState({ type:'allowance', label:'', amount:'' })
+  const [penalties, setPenalties] = useState([])
 
   useEffect(() => {
     setBatch(getPayrollBatch())
     setLines(getPayrollLines())
+    setPenalties(getPenaltyDeductions())
   }, [])
 
   if (!canAccess('payroll')) return <AppShell pageTitle="Payroll"><div className="page-shell"><div className="panel"><div className="empty-state"><h3>Access restricted</h3><p>Payroll is not available for your role.</p></div></div></div></AppShell>
@@ -113,6 +115,24 @@ export default function PayrollPage() {
               <input className="form-input" style={{fontSize:12}} placeholder="Amount (AED)" type="number" value={adjForm.amount} onChange={e => setAdjForm({...adjForm,amount:e.target.value})} />
               <button className="btn btn-teal btn-sm" onClick={handleAddAdj}>Add adjustment</button>
             </div>
+            {penalties.filter(p => p.worker_id === selected?.worker_id).length > 0 && (
+              <div style={{marginTop:16}}>
+                <div style={{fontSize:12,fontWeight:500,color:'var(--muted)',marginBottom:8}}>WARNING PENALTIES</div>
+                {penalties.filter(p => p.worker_id === selected.worker_id).map(p => (
+                  <div key={p.id} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:6,padding:'8px 10px',marginBottom:6}}>
+                    <div style={{fontSize:12,fontWeight:500}}>{p.label}</div>
+                    <div style={{fontSize:12,color:'var(--danger)',fontWeight:600}}>AED {p.amount.toFixed(2)}</div>
+                    <div style={{fontSize:11,color:'var(--hint)',marginBottom:6}}>{p.status === 'pending_hr_confirmation' ? '⏳ Awaiting HR confirmation' : '✓ Confirmed'}</div>
+                    <div style={{display:'flex',gap:6}}>
+                      {p.status === 'pending_hr_confirmation' && (
+                        <button className="btn btn-teal btn-sm" onClick={() => { confirmPenaltyDeduction(p.id); setPenalties(getPenaltyDeductions()) }}>Confirm</button>
+                      )}
+                      <button className="btn btn-ghost btn-sm" style={{color:'var(--danger)'}} onClick={() => { removePenaltyDeduction(p.id); setPenalties(getPenaltyDeductions()) }}>Remove</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

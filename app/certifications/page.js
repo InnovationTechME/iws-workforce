@@ -4,18 +4,21 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { getCertifications, addCertification, makeId } from '../../lib/mockStore'
-import { formatDate, getStatusTone } from '../../lib/utils'
+import { getCertifications, addCertification, getWorkers, makeId } from '../../lib/mockStore'
+import { formatDate, getStatusTone, validateRequired, validateDateNotPast } from '../../lib/utils'
 
 const CERT_TYPES = ['Working at Height','H2S Awareness','Confined Space Entry','First Aid','Welding Certificate','Rigger/Banksman','Scaffolder','Forklift Operator','IPAF/MEWP','Electrician Licence','BOSIET/HUET','Safety Officer','HSE Officer','Custom']
 
 export default function CertificationsPage() {
   const [certs, setCerts] = useState([])
+  const [workers, setWorkers] = useState([])
   const [queue, setQueue] = useState('expired')
   const [showDrawer, setShowDrawer] = useState(false)
-  const [form, setForm] = useState({ worker_id:'', certification_type:'Working at Height', issuer:'', issue_date:'', expiry_date:'', renewal_required:false })
+  const [formErrors, setFormErrors] = useState([])
+  const [formWarnings, setFormWarnings] = useState([])
+  const [form, setForm] = useState({ worker_id:'', certification_type:'Working at Height', issuer:'', issue_date:'', expiry_date:'', renewal_required:false, file_name:null })
 
-  useEffect(() => { setCerts(getCertifications()) }, [])
+  useEffect(() => { setCerts(getCertifications()); setWorkers(getWorkers()) }, [])
 
   const queues = {
     expired: certs.filter(c => c.status === 'expired'),
@@ -27,10 +30,20 @@ export default function CertificationsPage() {
   const current = queues[queue] || []
 
   const handleAdd = () => {
+    const errors = validateRequired([
+      {value: form.worker_id, label:'Worker'},
+      {value: form.certification_type, label:'Certification type'},
+      {value: form.expiry_date, label:'Expiry date'},
+    ])
+    if (errors.length > 0) { setFormErrors(errors); return }
+    const pastWarn = validateDateNotPast(form.expiry_date, 'Expiry date')
+    setFormWarnings([pastWarn].filter(Boolean))
+    setFormErrors([])
     const cert = { ...form, id: makeId('cert'), status: 'valid', file_url: null }
     addCertification(cert)
     setCerts(getCertifications())
     setShowDrawer(false)
+    setFormWarnings([])
   }
 
   return (
@@ -75,15 +88,18 @@ export default function CertificationsPage() {
       </div>
 
       {showDrawer && (
-        <DrawerForm title="Add Certification" onClose={() => setShowDrawer(false)}
-          footer={<div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary" onClick={() => setShowDrawer(false)}>Cancel</button><button className="btn btn-primary" onClick={handleAdd}>Add</button></div>}>
+        <DrawerForm title="Add Certification" onClose={() => { setShowDrawer(false); setFormErrors([]); setFormWarnings([]) }}
+          footer={<div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary" onClick={() => { setShowDrawer(false); setFormErrors([]); setFormWarnings([]) }}>Cancel</button><button className="btn btn-primary" onClick={handleAdd}>Add</button></div>}>
           <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            {formErrors.length > 0 && <div style={{background:'#fef2f2',border:'1px solid var(--danger)',borderRadius:6,padding:'10px 12px',display:'flex',flexDirection:'column',gap:4}}>{formErrors.map(e => <div key={e} style={{color:'var(--danger)',fontSize:12}}>⚠ {e}</div>)}</div>}
+            {formWarnings.length > 0 && <div style={{background:'var(--warning-bg)',border:'1px solid var(--warning-border)',borderRadius:6,padding:'10px 12px',display:'flex',flexDirection:'column',gap:4}}>{formWarnings.map(w => <div key={w} style={{color:'var(--warning)',fontSize:12}}>⚠ {w}</div>)}</div>}
             <div className="form-grid">
-              <div className="form-field"><label className="form-label">Worker ID</label><input className="form-input" value={form.worker_id} onChange={e => setForm({...form,worker_id:e.target.value})} placeholder="w-001" /></div>
-              <div className="form-field"><label className="form-label">Certification type</label><select className="form-select" value={form.certification_type} onChange={e => setForm({...form,certification_type:e.target.value})}>{CERT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+              <div className="form-field"><label className="form-label">Worker *</label><select className="form-select" value={form.worker_id} onChange={e => setForm({...form,worker_id:e.target.value})}><option value="">Select worker</option>{workers.map(w=><option key={w.id} value={w.id}>{w.full_name} ({w.worker_number})</option>)}</select></div>
+              <div className="form-field"><label className="form-label">Certification type *</label><select className="form-select" value={form.certification_type} onChange={e => setForm({...form,certification_type:e.target.value})}>{CERT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
               <div className="form-field"><label className="form-label">Issuer</label><input className="form-input" value={form.issuer} onChange={e => setForm({...form,issuer:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Issue date</label><input className="form-input" type="date" value={form.issue_date} onChange={e => setForm({...form,issue_date:e.target.value})} /></div>
-              <div className="form-field"><label className="form-label">Expiry date</label><input className="form-input" type="date" value={form.expiry_date} onChange={e => setForm({...form,expiry_date:e.target.value})} /></div>
+              <div className="form-field"><label className="form-label">Expiry date *</label><input className="form-input" type="date" value={form.expiry_date} onChange={e => setForm({...form,expiry_date:e.target.value})} /></div>
+              <div className="form-field"><label className="form-label">Upload file</label><input type="file" className="form-input" onChange={e => setForm({...form, file_name: e.target.files[0]?.name || null})} />{form.file_name && <div style={{fontSize:11,color:'var(--teal)',marginTop:4}}>📎 {form.file_name}</div>}</div>
             </div>
             <div className="form-field"><label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer'}}><input type="checkbox" checked={form.renewal_required} onChange={e => setForm({...form,renewal_required:e.target.checked})} /><span className="form-label" style={{margin:0}}>Renewal required</span></label></div>
           </div>

@@ -1,6 +1,7 @@
 'use client'
 import Sidebar from './Sidebar'
-import { getInboxItems } from '../lib/mockStore'
+import { getInboxItems, getAttendance } from '../lib/mockStore'
+import { TODAY } from '../lib/utils'
 
 export default function AppShell({ children, pageTitle }) {
   let alertDots = {}
@@ -15,6 +16,7 @@ export default function AppShell({ children, pageTitle }) {
       inbox: totalInbox > 0 ? 'danger' : 'neutral',
       warnings: inbox.openWarnings.length > 0 ? 'danger' : 'neutral',
       timesheets: inbox.pendingTimesheets.length > 0 ? 'warning' : 'neutral',
+      attendance: getAttendance().filter(a => a.date === TODAY && a.reason === 'absent_no_cert').length > 0 ? 'warning' : 'neutral',
     }
   } catch(e) {}
   return (
