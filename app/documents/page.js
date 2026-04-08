@@ -112,7 +112,26 @@ export default function DocumentsPage() {
               <div className="form-field"><label className="form-label">Document type *</label><select className="form-select" value={form.document_type} onChange={e => setForm({...form,document_type:e.target.value})}>{DOCUMENT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
               <div className="form-field"><label className="form-label">Issue date *</label><input className="form-input" type="date" value={form.issue_date} onChange={e => setForm({...form,issue_date:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Expiry date *</label><input className="form-input" type="date" value={form.expiry_date} onChange={e => setForm({...form,expiry_date:e.target.value})} /></div>
-              <div className="form-field"><label className="form-label">Upload file</label><input type="file" className="form-input" onChange={e => setForm({...form, file_name: e.target.files[0]?.name || null})} />{form.file_name && <div style={{fontSize:11,color:'var(--teal)',marginTop:4}}>📎 {form.file_name}</div>}</div>
+              <div className="form-field"><label className="form-label">Upload file</label><input type="file" className="form-input" onChange={e => {
+                const file = e.target.files[0]
+                if (!file) return
+                const ext = file.name.split('.').pop()
+                const worker = workers.find(w => w.id === form.worker_id)
+                let autoName = file.name
+                if (worker && form.document_type) {
+                  const safeName = worker.full_name.replace(/\s+/g,'')
+                  autoName = `${worker.worker_number}_${safeName}_${form.document_type}.${ext}`
+                }
+                setForm({...form, file_name: autoName, file_original: file.name})
+              }} />
+              {form.file_name && (
+                <div style={{marginTop:4}}>
+                  <div style={{fontSize:11,color:'var(--teal)'}}>📎 Saved as: <strong>{form.file_name}</strong></div>
+                  {form.file_original && form.file_original !== form.file_name && (
+                    <div style={{fontSize:10,color:'var(--hint)'}}>Original: {form.file_original}</div>
+                  )}
+                </div>
+              )}</div>
             </div>
             <div className="form-field"><label className="form-label">Notes</label><textarea className="form-textarea" value={form.notes} onChange={e => setForm({...form,notes:e.target.value})} rows={2} /></div>
           </div>

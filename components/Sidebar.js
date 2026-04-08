@@ -28,14 +28,15 @@ export default function Sidebar({ alertDots = {} }) {
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-top">
-        <div className="sidebar-brand">
-          <div className="brand-mark">IT</div>
-          <div>
-            <div className="brand-name">Innovation Technologies</div>
-            <div className="brand-sub">Workforce System</div>
-          </div>
+      <div style={{padding:'16px 16px 12px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10}}>
+        <img src="/logo.svg" alt="iN" style={{width:32,height:38}} />
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:'var(--teal)',lineHeight:1.2}}>Innovation</div>
+          <div style={{fontSize:11,fontWeight:600,color:'var(--text)',lineHeight:1.2}}>Technologies</div>
+          <div style={{fontSize:9,color:'var(--muted)',lineHeight:1.4}}>Workforce System</div>
         </div>
+      </div>
+      <div style={{padding:'6px 16px'}}>
         <div className="role-chip">{roleLabel}</div>
       </div>
       <nav className="nav-section">
