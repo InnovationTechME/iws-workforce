@@ -134,7 +134,7 @@ export default function OnboardingPage() {
                 <button className="btn btn-primary" onClick={() => setShowMedicalDrawer(true)}>Record Medical Result</button>
               )}
               {selected.onboarding_status === 'Documentation' && !selected.documentation_complete && (
-                <div className="notice info" style={{fontSize:12}}>Upload required documents in the worker's Documents tab, then convert to employee.</div>
+                <div className="notice info" style={{fontSize:12}}>Upload required documents in the worker&apos;s Documents tab, then convert to employee.</div>
               )}
               {selected.onboarding_status === 'Documentation' && (
                 <button className="btn btn-teal" onClick={handleConvert}>✓ Convert to Employee</button>
