@@ -41,6 +41,7 @@ export default function WorkerDetailPage() {
   const warningBadges = { first: [{label:'1st Warning', cls:'badge-1st'}], second: [{label:'1st Warning',cls:'badge-1st'},{label:'2nd Warning',cls:'badge-2nd'}], final: [{label:'1st Warning',cls:'badge-1st'},{label:'2nd Warning',cls:'badge-2nd'},{label:'Final Warning',cls:'badge-final'}], none: [] }
 
   return (
+    <>
     <AppShell pageTitle={worker.full_name}>
       <PageHeader eyebrow="Worker detail" title={worker.full_name}
         description={`${worker.worker_number} · ${worker.category} · ${worker.trade_role}`}
@@ -249,7 +250,8 @@ export default function WorkerDetailPage() {
         )}
       </div>
 
-      {viewerHtml && <LetterViewer html={viewerHtml} refNumber={viewerRef} onClose={() => setViewerHtml(null)} />}
     </AppShell>
+    {viewerHtml && <LetterViewer html={viewerHtml} refNumber={viewerRef} onClose={() => { setViewerHtml(null); setViewerRef('') }} />}
+    </>
   )
 }

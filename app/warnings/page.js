@@ -49,6 +49,7 @@ export default function WarningsPage() {
   }
 
   return (
+    <>
     <AppShell pageTitle="Warnings">
       <PageHeader eyebrow="Warnings" title="Warnings and memos register" description="Track disciplinary records, memos, and follow-up status."
         actions={<button className="btn btn-primary" onClick={() => setShowDrawer(true)}>+ Create Record</button>} />
@@ -132,7 +133,8 @@ export default function WarningsPage() {
         </DrawerForm>
       )}
 
-      {viewerHtml && <LetterViewer html={viewerHtml} refNumber={viewerRef} onClose={() => setViewerHtml(null)} />}
     </AppShell>
+    {viewerHtml && <LetterViewer html={viewerHtml} refNumber={viewerRef} onClose={() => { setViewerHtml(null); setViewerRef('') }} />}
+    </>
   )
 }

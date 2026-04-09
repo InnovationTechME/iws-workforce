@@ -5,9 +5,11 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { getOffers, addOffer, updateOffer, checkBlacklist, makeId } from '../../lib/mockStore'
+import { getOffers, addOffer, updateOffer, checkBlacklist, makeId, generateRefNumber, addLetter } from '../../lib/mockStore'
 import { formatCurrency, formatDate, getStatusTone, calculateOTRates } from '../../lib/utils'
 import { NATIONALITIES, POSITIONS } from '../../data/constants'
+import { offerLetterHTML } from '../../lib/letterTemplates'
+import LetterViewer from '../../components/LetterViewer'
 
 export default function OffersPage() {
   const [offers, setOffers] = useState([])
@@ -15,6 +17,8 @@ export default function OffersPage() {
   const [showDrawer, setShowDrawer] = useState(false)
   const [blacklistWarning, setBlacklistWarning] = useState(null)
   const [formErrors, setFormErrors] = useState([])
+  const [viewerHtml, setViewerHtml] = useState(null)
+  const [viewerRef, setViewerRef] = useState('')
   const [form, setForm] = useState({ first_name:'', last_name:'', passport_number:'', nationality:'', email:'', trade_role:'', category:'Direct Employee', employment_type:'Open-ended', pay_type:'monthly', basic_salary_or_rate:'', housing_allowance:'', transport_allowance:'', food_allowance:'', other_allowance:'', start_date:'', valid_until:'', notes:'' })
 
   useEffect(() => { setOffers(getOffers()) }, [])
@@ -66,6 +70,7 @@ export default function OffersPage() {
   const statusColors = { draft:'neutral', sent:'info', signed:'success', rescinded:'danger' }
 
   return (
+    <>
     <AppShell pageTitle="Offers">
       <PageHeader eyebrow="Offers" title="Offer register" description="Create and track offer letters from draft through to signed acceptance."
         actions={<button className="btn btn-primary" onClick={() => setShowDrawer(true)}>+ Create Offer Letter</button>} />
@@ -99,7 +104,17 @@ export default function OffersPage() {
                   <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(o.validity_date || o.valid_until)}</td>
                   <td><StatusBadge label={o.offer_status} tone={statusColors[o.offer_status]||'neutral'} /></td>
                   <td>
-                    <div style={{display:'flex',gap:6}}>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                      <button className="btn btn-teal btn-sm" onClick={() => {
+                        try {
+                          const ref = generateRefNumber('offer_letter')
+                          const today = new Date().toISOString().split('T')[0]
+                          const workerData = { full_name: o.candidate_name||'Candidate', passport_number: o.passport_number||'—', nationality: o.nationality||'—', trade_role: o.trade_role||o.position||'—', category: o.category||'—', worker_number: o.id||'—', joining_date: o.start_date||'—', housing_allowance: o.housing_allowance||0, transport_allowance: o.transport_allowance||0, food_allowance: o.food_allowance||0 }
+                          const offerData = { ...o, trade_role: o.trade_role||o.position||'—', employment_type: o.employment_type||o.category||'—', pay_type: o.pay_type||o.salary_type||'monthly', base_salary_or_rate: o.basic_salary_or_rate||o.salary_monthly||o.hourly_rate||0, housing_allowance: o.housing_allowance||0, transport_allowance: o.transport_allowance||0, food_allowance: o.food_allowance||0, start_date: o.start_date||'—', nationality: o.nationality||'—', passport_number: o.passport_number||'—' }
+                          const html = offerLetterHTML(workerData, offerData, ref, today, 'english')
+                          setViewerHtml(html); setViewerRef(ref)
+                        } catch(err) { console.error(err); alert('Letter error: ' + err.message) }
+                      }}>📄 Letter</button>
                       {o.offer_status === 'draft' && <button className="btn btn-secondary btn-sm" onClick={() => handleStatusChange(o.id,'sent')}>Mark Sent</button>}
                       {o.offer_status === 'sent' && <button className="btn btn-teal btn-sm" onClick={() => handleStatusChange(o.id,'signed')}>Mark Signed</button>}
                       {o.offer_status === 'sent' && <button className="btn btn-danger btn-sm" onClick={() => handleStatusChange(o.id,'rescinded')}>Rescind</button>}
@@ -158,5 +173,7 @@ export default function OffersPage() {
         </DrawerForm>
       )}
     </AppShell>
+    {viewerHtml && <LetterViewer html={viewerHtml} refNumber={viewerRef} onClose={() => { setViewerHtml(null); setViewerRef('') }} />}
+    </>
   )
 }
