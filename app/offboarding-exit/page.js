@@ -10,7 +10,8 @@ import {
   OFFBOARDING_ITEMS
 } from '../../lib/mockStore'
 import { getRole } from '../../lib/mockAuth'
-import { formatDate } from '../../lib/utils'
+import { formatDate, formatCurrency } from '../../lib/utils'
+import { calculateFinalSettlement } from '../../lib/finalSettlement'
 
 export default function OffboardingExitPage() {
   const [records, setRecords] = useState([])
@@ -21,6 +22,9 @@ export default function OffboardingExitPage() {
   const [closeResult, setCloseResult] = useState(null)
   const [form, setForm] = useState({ worker_id:'', reason:'Resignation', last_working_date:'' })
   const [role, setRoleState] = useState('owner')
+  const [finalSettlement, setFinalSettlement] = useState(null)
+  const [terminationType, setTerminationType] = useState('resignation')
+  const [noticeServedDays, setNoticeServedDays] = useState(0)
 
   useEffect(() => {
     setRecords(getOffboarding())
@@ -113,6 +117,56 @@ export default function OffboardingExitPage() {
               <div><h2>{selected.worker_name}</h2><p>{selected.worker_number} · {selected.reason} · Last day: {formatDate(selected.last_working_date)}</p></div>
               <StatusBadge label={selected.status} tone={selected.status==='closed'?'success':'warning'}/>
             </div>
+            {/* Final Settlement Calculator */}
+            <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,padding:16,marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:700,color:'var(--text)',marginBottom:12}}>Final Settlement Calculation</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:12}}>
+                <div className="form-field"><label className="form-label">Termination type</label><select className="form-select" value={terminationType} onChange={e=>setTerminationType(e.target.value)}><option value="resignation">Resignation (60 days)</option><option value="with_notice">Company (30 days)</option><option value="without_notice">Without notice (Art. 44)</option></select></div>
+                <div className="form-field"><label className="form-label">Notice days served</label><input className="form-input" type="number" min="0" value={noticeServedDays} onChange={e=>setNoticeServedDays(parseInt(e.target.value)||0)} /></div>
+                <div style={{display:'flex',alignItems:'flex-end'}}><button className="btn btn-teal" onClick={() => { const s = calculateFinalSettlement(selected.worker_id, selected.last_working_date, terminationType, noticeServedDays); setFinalSettlement(s) }}>Calculate Settlement</button></div>
+              </div>
+              {finalSettlement && (
+                <div style={{background:'#fff',borderRadius:8,border:'1px solid var(--border)',padding:16}}>
+                  {[['End of Service Gratuity', finalSettlement.breakdown.eos_gratuity.amount, finalSettlement.breakdown.eos_gratuity.calculation],
+                    ['Unused Annual Leave ('+finalSettlement.breakdown.unused_leave.days+' days)', finalSettlement.breakdown.unused_leave.amount, ''],
+                    ['Outstanding Salary ('+finalSettlement.breakdown.outstanding_salary.days+' days)', finalSettlement.breakdown.outstanding_salary.total, ''],
+                    ...(finalSettlement.breakdown.air_ticket.due ? [['Air Ticket ('+finalSettlement.breakdown.air_ticket.count+')', finalSettlement.breakdown.air_ticket.amount, '']] : []),
+                  ].map(([label, amount, note]) => (
+                    <div key={label} style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid #f1f5f9'}}>
+                      <div><div style={{fontSize:13,fontWeight:500}}>{label}</div>{note && <div style={{fontSize:11,color:'var(--muted)'}}>{note}</div>}</div>
+                      <div style={{fontSize:15,fontWeight:600}}>{formatCurrency(amount)}</div>
+                    </div>
+                  ))}
+                  {finalSettlement.breakdown.notice_period.is_deduction && (
+                    <div style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid #f1f5f9',background:'#fef2f2',margin:'0 -16px',padding:'8px 16px'}}>
+                      <div><div style={{fontSize:13,fontWeight:600,color:'var(--danger)'}}>Notice Period DEDUCTION</div><div style={{fontSize:11,color:'var(--danger)'}}>{finalSettlement.breakdown.notice_period.note}</div></div>
+                      <div style={{fontSize:15,fontWeight:700,color:'var(--danger)'}}>-{formatCurrency(finalSettlement.breakdown.notice_period.amount)}</div>
+                    </div>
+                  )}
+                  {!finalSettlement.breakdown.notice_period.is_deduction && finalSettlement.breakdown.notice_period.required_days > 0 && (
+                    <div style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid #f1f5f9'}}>
+                      <div><div style={{fontSize:13,fontWeight:500,color:'var(--success)'}}>Notice Period (Fully Served)</div><div style={{fontSize:11,color:'var(--muted)'}}>{finalSettlement.breakdown.notice_period.note}</div></div>
+                      <div style={{fontSize:13,color:'var(--success)'}}>✓ No deduction</div>
+                    </div>
+                  )}
+                  <div style={{display:'flex',justifyContent:'space-between',padding:'10px 0',marginTop:8,borderTop:'2px solid var(--border)'}}>
+                    <div style={{fontSize:13,fontWeight:600}}>Gross Settlement</div>
+                    <div style={{fontSize:16,fontWeight:700}}>{formatCurrency(finalSettlement.summary.gross_settlement)}</div>
+                  </div>
+                  {finalSettlement.summary.total_deductions > 0 && (
+                    <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0'}}>
+                      <div style={{fontSize:13,fontWeight:600,color:'var(--danger)'}}>Total Deductions</div>
+                      <div style={{fontSize:16,fontWeight:700,color:'var(--danger)'}}>-{formatCurrency(finalSettlement.summary.total_deductions)}</div>
+                    </div>
+                  )}
+                  <div style={{display:'flex',justifyContent:'space-between',padding:'12px 16px',background:'#f0fdfa',borderRadius:8,marginTop:8}}>
+                    <div style={{fontSize:15,fontWeight:800}}>NET FINAL SETTLEMENT</div>
+                    <div style={{fontSize:22,fontWeight:800,color:'var(--teal)'}}>{formatCurrency(finalSettlement.summary.net_settlement)}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',marginBottom:10,textTransform:'uppercase',letterSpacing:'0.5px'}}>Exit Checklist</div>
             <div style={{display:'flex',flexDirection:'column',gap:0}}>
               {OFFBOARDING_ITEMS.map(item => {
