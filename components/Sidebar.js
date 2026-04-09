@@ -12,6 +12,7 @@ const navItems = [
   { href: '/workers', label: 'Workers', module: 'workers' },
   { href: '/documents', label: 'Documents', module: 'documents' },
   { href: '/certifications', label: 'Certifications', module: 'certifications' },
+  { href: '/approvals', label: 'Approvals', module: 'approvals' },
   { href: '/timesheets', label: 'Timesheets', module: 'timesheets' },
   { href: '/timesheet-reconcile', label: 'Reconciliation', module: 'timesheet-reconcile' },
   { href: '/attendance', label: 'Attendance', module: 'attendance' },

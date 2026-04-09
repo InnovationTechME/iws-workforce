@@ -2,10 +2,9 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
-import { getDashboardMetrics, getInboxItems } from '../../lib/mockStore'
+import { getDashboardMetrics, getInboxItems, getPendingApprovalsForRole, getWorkerDisplay } from '../../lib/mockStore'
 import { formatDate } from '../../lib/utils'
 import { getRole } from '../../lib/mockAuth'
-import ApprovalsDashboard from '../../components/ApprovalsDashboard'
 
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState(null)
@@ -90,7 +89,30 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <ApprovalsDashboard />
+      {(() => {
+        try {
+          const role = getRole()
+          if (role !== 'operations' && role !== 'owner') return null
+          const ap = getPendingApprovalsForRole(role)
+          const total = ap.timesheets.length + ap.payroll.length + ap.warnings.length + ap.terminations.length + ap.leave.length
+          if (total === 0) return null
+          return (
+            <div style={{background:'linear-gradient(135deg,#f97316,#ea580c)',borderRadius:12,padding:'24px 28px',marginBottom:20,cursor:'pointer',border:'3px solid #fb923c'}} onClick={() => router.push('/approvals')}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div>
+                  <div style={{color:'rgba(255,255,255,0.9)',fontSize:12,fontWeight:600,marginBottom:6}}>⚠️ PENDING APPROVALS</div>
+                  <div style={{color:'white',fontSize:48,fontWeight:800,lineHeight:1}}>{total}</div>
+                  <div style={{color:'rgba(255,255,255,0.85)',fontSize:12,marginTop:8}}>
+                    {ap.timesheets.length > 0 ? ap.timesheets.length+' Timesheets · ' : ''}{ap.payroll.length > 0 ? ap.payroll.length+' Payroll · ' : ''}{ap.warnings.length > 0 ? ap.warnings.length+' Warnings · ' : ''}{ap.terminations.length > 0 ? ap.terminations.length+' Terminations · ' : ''}{ap.leave.length > 0 ? ap.leave.length+' Leave' : ''}
+                  </div>
+                  <div style={{color:'white',fontSize:15,fontWeight:600,marginTop:12}}>Click to review and approve →</div>
+                </div>
+                <div style={{color:'white',fontSize:56,opacity:0.6}}>→</div>
+              </div>
+            </div>
+          )
+        } catch(e) { return null }
+      })()}
 
       <div style={{marginBottom:8}}>
         <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:10}}>Action Queue — Priority Order</div>
@@ -125,13 +147,13 @@ export default function DashboardPage() {
             : <div className="table-wrap"><table>
                 <thead><tr><th>Worker</th><th>Document</th><th>Expired</th></tr></thead>
                 <tbody>
-                  {inbox.expiredDocs?.slice(0,6).map(d=>(
+                  {inbox.expiredDocs?.slice(0,6).map(d=>{ const wi = getWorkerDisplay(d.worker_id); return (
                     <tr key={d.id} style={{cursor:'pointer',background:'#fff8f8'}} onClick={()=>router.push('/documents')}>
-                      <td style={{fontSize:12,fontWeight:500,color:'var(--teal)'}}>{d.worker_id}</td>
+                      <td><div style={{fontSize:12,fontWeight:600,color:'var(--teal)'}}>{wi.id}</div><div style={{fontSize:11,color:'var(--muted)'}}>{wi.name}</div></td>
                       <td style={{fontSize:12}}>{d.document_type}</td>
                       <td style={{fontSize:11,color:'#dc2626',fontWeight:500}}>{formatDate(d.expiry_date)}</td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table></div>
           }
@@ -143,13 +165,13 @@ export default function DashboardPage() {
             : <div className="table-wrap"><table>
                 <thead><tr><th>Worker</th><th>Certification</th><th>Expired</th></tr></thead>
                 <tbody>
-                  {inbox.expiredCerts?.slice(0,6).map(c=>(
+                  {inbox.expiredCerts?.slice(0,6).map(c=>{ const wi = getWorkerDisplay(c.worker_id); return (
                     <tr key={c.id} style={{cursor:'pointer',background:'#fff8f8'}} onClick={()=>router.push('/certifications')}>
-                      <td style={{fontSize:12,fontWeight:500,color:'var(--teal)'}}>{c.worker_id}</td>
+                      <td><div style={{fontSize:12,fontWeight:600,color:'var(--teal)'}}>{wi.id}</div><div style={{fontSize:11,color:'var(--muted)'}}>{wi.name}</div></td>
                       <td style={{fontSize:12}}>{c.certification_type}</td>
                       <td style={{fontSize:11,color:'#dc2626',fontWeight:500}}>{formatDate(c.expiry_date)}</td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table></div>
           }

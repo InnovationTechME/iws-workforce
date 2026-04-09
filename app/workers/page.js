@@ -71,7 +71,7 @@ export default function WorkersPage() {
               <tbody>
                 {filtered.map(w => (
                   <tr key={w.id}>
-                    <td><div style={{fontWeight:500}}>{w.full_name}</div><div style={{fontSize:11,color:'var(--hint)'}}>{w.worker_number}</div></td>
+                    <td><div style={{display:'flex',alignItems:'center',gap:8}}><div style={{width:32,height:32,borderRadius:'50%',background:'var(--teal-bg)',border:'1px solid var(--teal-border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:600,color:'var(--teal)',flexShrink:0}}>{w.full_name.split(' ').map(n=>n[0]).join('').slice(0,2)}</div><div><div style={{fontWeight:500}}>{w.full_name}</div><div style={{fontSize:11,color:'var(--hint)'}}>{w.worker_number}</div></div></div></td>
                     <td>{w.trade_role}</td>
                     <td>
                       <StatusBadge label={w.category} tone={w.category === 'Subcontractor' ? 'neutral' : w.category === 'Office Staff' ? 'info' : 'neutral'} />
