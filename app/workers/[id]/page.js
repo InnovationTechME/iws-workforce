@@ -68,18 +68,41 @@ export default function WorkerDetailPage() {
         </div>
 
         {tab === 'profile' && (
-          <div className="form-grid">
-            {[['Full name',worker.full_name],['Worker number',worker.worker_number],['Category',worker.category],['Trade / role',worker.trade_role],['Nationality',worker.nationality],['Passport',worker.passport_number],['Mobile',worker.mobile_number],['Email',worker.email],['Visa company',worker.visa_company],['Project site',worker.project_site],['Joining date',formatDate(worker.joining_date)],['Onboarding status',worker.onboarding_status]].map(([label,value]) => (
-              <div key={label}>
-                <div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>{label}</div>
-                <div style={{fontSize:13,fontWeight:500}}>{value || '—'}</div>
-              </div>
-            ))}
-            {worker.category === 'Subcontractor' && <>
+          <div>
+            <div className="form-grid">
+              {[['Full name',worker.full_name],['Worker number',worker.worker_number],['Category',worker.category],['Trade / role',worker.trade_role],['Nationality',worker.nationality],['Passport',worker.passport_number],['Date of birth',worker.date_of_birth||'—'],['Passport expiry',formatDate(worker.passport_expiry)],['Emirates ID',worker.emirates_id||'—'],['EID expiry',formatDate(worker.emirates_id_expiry)],['Mobile',worker.mobile_number],['Email',worker.email],['Visa company',worker.visa_company],['Visa number',worker.visa_number||'—'],['Project site',worker.project_site],['Joining date',formatDate(worker.joining_date)],['Onboarding status',worker.onboarding_status]].map(([label,value]) => (
+                <div key={label}>
+                  <div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>{label}</div>
+                  <div style={{fontSize:13,fontWeight:500}}>{value || '—'}</div>
+                </div>
+              ))}
+            </div>
+            {worker.category === 'Subcontractor' && <div className="form-grid" style={{marginTop:12}}>
               <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Subcontractor company</div><div style={{fontSize:13,fontWeight:500}}>{worker.subcontractor_company || '—'}</div></div>
               <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Billing rate</div><div style={{fontSize:13,fontWeight:500}}>{worker.subcontractor_billing_rate ? formatCurrency(worker.subcontractor_billing_rate) + '/hr' : '—'}</div></div>
               <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Cost rate</div><div style={{fontSize:13,fontWeight:500}}>{worker.subcontractor_cost_rate ? formatCurrency(worker.subcontractor_cost_rate) + '/hr' : '—'}</div></div>
-            </>}
+            </div>}
+            <div style={{marginTop:16,background:'var(--surface)',borderRadius:8,padding:'14px 16px',border:'0.5px solid var(--border)'}}>
+              <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',marginBottom:10,textTransform:'uppercase',letterSpacing:'0.5px'}}>Compensation</div>
+              {worker.payroll_type === 'monthly' ? (
+                <div className="form-grid">
+                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Basic salary</div><div style={{fontSize:13,fontWeight:600}}>{formatCurrency(worker.monthly_salary)}/mo</div></div>
+                  {worker.housing_allowance > 0 && <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Housing allowance</div><div style={{fontSize:13,fontWeight:500}}>{formatCurrency(worker.housing_allowance)}/mo</div></div>}
+                  {worker.transport_allowance > 0 && <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Transport allowance</div><div style={{fontSize:13,fontWeight:500}}>{formatCurrency(worker.transport_allowance)}/mo</div></div>}
+                  {worker.food_allowance > 0 && <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Food allowance</div><div style={{fontSize:13,fontWeight:500}}>{formatCurrency(worker.food_allowance)}/mo</div></div>}
+                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Total package</div><div style={{fontSize:13,fontWeight:700,color:'var(--teal)'}}>{formatCurrency(worker.monthly_salary + (worker.housing_allowance||0) + (worker.transport_allowance||0) + (worker.food_allowance||0) + (worker.other_allowance||0))}/mo</div></div>
+                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (weekday 125%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.monthly_salary / 26 / 8 * 1.25).toFixed(2)}/hr</div></div>
+                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (Friday 150%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.monthly_salary / 26 / 8 * 1.5).toFixed(2)}/hr</div></div>
+                </div>
+              ) : (
+                <div className="form-grid">
+                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Hourly rate</div><div style={{fontSize:13,fontWeight:600}}>{formatCurrency(worker.hourly_rate)}/hr</div></div>
+                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (125%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.hourly_rate * 1.25).toFixed(2)}/hr</div></div>
+                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (150%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.hourly_rate * 1.5).toFixed(2)}/hr</div></div>
+                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Est. monthly (208 hrs)</div><div style={{fontSize:13,fontWeight:500}}>{formatCurrency(worker.hourly_rate * 208)}</div></div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -148,7 +171,8 @@ export default function WorkerDetailPage() {
               <button className="btn btn-teal btn-sm" onClick={() => {
                 const ref = generateRefNumber('offer_letter')
                 const today = new Date().toISOString().split('T')[0]
-                const html = offerLetterHTML(worker, worker, ref, today, letterLang)
+                const offerData = { ...worker, trade_role: worker.trade_role, employment_type: worker.category, pay_type: worker.pay_type || 'monthly', base_salary_or_rate: worker.monthly_salary || worker.hourly_rate || 0, housing_allowance: worker.housing_allowance || 0, transport_allowance: worker.transport_allowance || 0, food_allowance: worker.food_allowance || 0, start_date: worker.joining_date || '', nationality: worker.nationality || '', passport_number: worker.passport_number || '' }
+                const html = offerLetterHTML(worker, offerData, ref, today, letterLang)
                 addLetter({ id: makeId('let'), ref_number: ref, letter_type:'offer_letter', worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language: letterLang, issued_date: today, issued_by:'HR Admin', linked_record_id:null, status:'issued', notes:'' })
                 setLetters(getLettersByWorker(worker.id))
                 setViewerHtml(html); setViewerRef(ref)

@@ -99,7 +99,7 @@ export default function CertificationsPage() {
               <div className="form-field"><label className="form-label">Issuer</label><input className="form-input" value={form.issuer} onChange={e => setForm({...form,issuer:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Issue date</label><input className="form-input" type="date" value={form.issue_date} onChange={e => setForm({...form,issue_date:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Expiry date *</label><input className="form-input" type="date" value={form.expiry_date} onChange={e => setForm({...form,expiry_date:e.target.value})} /></div>
-              <div className="form-field"><label className="form-label">Upload file</label><input type="file" className="form-input" onChange={e => {
+              <div className="form-field"><label className="form-label">Upload file</label><input type="file" className="form-input" accept=".pdf,.jpg,.jpeg,.png,.PDF,.JPG,.JPEG,.PNG" onChange={e => {
                 const file = e.target.files[0]
                 if (!file) return
                 const ext = file.name.split('.').pop()
