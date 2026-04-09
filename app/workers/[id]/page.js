@@ -6,7 +6,7 @@ import AppShell from '../../../components/AppShell'
 import PageHeader from '../../../components/PageHeader'
 import StatusBadge from '../../../components/StatusBadge'
 import LetterViewer from '../../../components/LetterViewer'
-import { getWorker, getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId } from '../../../lib/mockStore'
+import { getWorker, getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS } from '../../../lib/mockStore'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
 import { offerLetterHTML, warningLetterHTML, experienceLetterHTML } from '../../../lib/letterTemplates'
 
@@ -47,6 +47,16 @@ export default function WorkerDetailPage() {
         actions={<div style={{display:'flex',gap:8}}><Link href="/workers" className="btn btn-secondary">← Workers</Link></div>}
         meta={<StatusBadge label={worker.status} tone={getStatusTone(worker.status)} />} />
 
+      {(() => { const obr = getOffboardingByWorker(id); return obr && obr.status === 'in_progress' ? (
+        <div style={{background:'#fff7ed',border:'2px solid #f97316',borderRadius:8,padding:'12px 16px',marginBottom:16,display:'flex',alignItems:'center',gap:12}}>
+          <span style={{fontSize:20}}>🚪</span>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:'#9a3412'}}>Offboarding in progress</div>
+            <div style={{fontSize:12,color:'#9a3412'}}>Last working date: {formatDate(obr.last_working_date)} · Reason: {obr.reason}</div>
+            <div style={{fontSize:11,color:'#c2410c',marginTop:2}}>{OFFBOARDING_ITEMS.filter(i=>i.required&&!obr.checklist[i.key]?.done).length} required exit items outstanding</div>
+          </div>
+        </div>
+      ) : null })()}
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
         <div className="stat-card"><div className="num" style={{fontSize:20}}>{worker.payroll_type === 'monthly' ? formatCurrency(worker.monthly_salary) : formatCurrency(worker.hourly_rate) + '/hr'}</div><div className="lbl">Compensation</div></div>
         <div className="stat-card"><div className={`num ${expiredDocs > 0 ? 'danger' : ''}`} style={{fontSize:20}}>{expiredDocs}</div><div className="lbl">Doc issues</div></div>

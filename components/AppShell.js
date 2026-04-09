@@ -1,6 +1,6 @@
 'use client'
 import Sidebar from './Sidebar'
-import { getInboxItems, getAttendance } from '../lib/mockStore'
+import { getInboxItems, getAttendance, getOffboarding } from '../lib/mockStore'
 import { TODAY } from '../lib/utils'
 
 export default function AppShell({ children, pageTitle }) {
@@ -10,6 +10,7 @@ export default function AppShell({ children, pageTitle }) {
     const docIssues = inbox.expiredDocs.length + inbox.missingDocs.length
     const certIssues = inbox.expiredCerts.length
     const totalInbox = Object.values(inbox).reduce((sum, arr) => sum + arr.length, 0)
+    const offInProgress = getOffboarding().filter(o => o.status === 'in_progress').length
     alertDots = {
       documents: docIssues > 0 ? 'danger' : inbox.expiringDocs.length > 0 ? 'warning' : 'neutral',
       certifications: certIssues > 0 ? 'danger' : inbox.expiringCerts.length > 0 ? 'warning' : 'neutral',
@@ -17,6 +18,7 @@ export default function AppShell({ children, pageTitle }) {
       warnings: inbox.openWarnings.length > 0 ? 'danger' : 'neutral',
       timesheets: inbox.pendingTimesheets.length > 0 ? 'warning' : 'neutral',
       attendance: getAttendance().filter(a => a.date === TODAY && a.reason === 'absent_no_cert').length > 0 ? 'warning' : 'neutral',
+      'offboarding-exit': offInProgress > 0 ? 'danger' : 'neutral',
     }
   } catch(e) {}
   return (

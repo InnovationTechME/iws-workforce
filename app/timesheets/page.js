@@ -36,12 +36,13 @@ export default function TimesheetsPage() {
 
   const handleAddLine = () => {
     const worker = workers.find(w => w.id === lForm.worker_id)
+    const isFlat = worker?.category === 'Contracted Hourly Worker' || worker?.category === 'Subcontractor'
     const start = lForm.start_time.split(':').map(Number)
     const end = lForm.end_time.split(':').map(Number)
     const total = (end[0]*60+end[1] - start[0]*60-start[1]) / 60
     const normal = Math.min(total, 8)
-    const ot = Number(lForm.ot_hours) || Math.max(total - 8, 0)
-    addTimesheetLine({ ...lForm, id: makeId('tl'), header_id: selected.id, worker_name: worker?.full_name || '', worker_number: worker?.worker_number || '', trade_role: worker?.trade_role || '', total_hours: Math.round(total*100)/100, normal_hours: Math.round(normal*100)/100, ot_hours: ot, holiday_hours: Number(lForm.holiday_hours)||0 })
+    const ot = isFlat ? 0 : (Number(lForm.ot_hours) || Math.max(total - 8, 0))
+    addTimesheetLine({ ...lForm, id: makeId('tl'), header_id: selected.id, worker_name: worker?.full_name || '', worker_number: worker?.worker_number || '', trade_role: worker?.trade_role || '', category: worker?.category || '', total_hours: Math.round(total*100)/100, normal_hours: Math.round(normal*100)/100, ot_hours: ot, holiday_hours: isFlat ? 0 : Number(lForm.holiday_hours)||0 })
     setLines(getTimesheetLines(selected.id))
     setShowLineDrawer(false)
   }
@@ -142,8 +143,12 @@ export default function TimesheetsPage() {
             <div className="form-field"><label className="form-label">Work date</label><input className="form-input" type="date" value={lForm.work_date} onChange={e => setLForm({...lForm,work_date:e.target.value})} /></div>
             <div className="form-field"><label className="form-label">Start time</label><input className="form-input" type="time" value={lForm.start_time} onChange={e => setLForm({...lForm,start_time:e.target.value})} /></div>
             <div className="form-field"><label className="form-label">End time</label><input className="form-input" type="time" value={lForm.end_time} onChange={e => setLForm({...lForm,end_time:e.target.value})} /></div>
-            <div className="form-field"><label className="form-label">OT hours override</label><input className="form-input" type="number" step="0.5" value={lForm.ot_hours} onChange={e => setLForm({...lForm,ot_hours:e.target.value})} /></div>
-            <div className="form-field"><label className="form-label">Holiday hours</label><input className="form-input" type="number" step="0.5" value={lForm.holiday_hours} onChange={e => setLForm({...lForm,holiday_hours:e.target.value})} /></div>
+            {(() => { const sw = workers.find(w=>w.id===lForm.worker_id); const flat = sw?.category==='Contracted Hourly Worker'||sw?.category==='Subcontractor'; return flat ? (
+              <div className="notice info" style={{fontSize:12,gridColumn:'span 2'}}>ℹ Contracted hourly / subcontractor — flat rate only. All hours billed at AED {sw?.hourly_rate}/hr. No OT premium applied.</div>
+            ) : (<>
+              <div className="form-field"><label className="form-label">OT hours override</label><input className="form-input" type="number" step="0.5" value={lForm.ot_hours} onChange={e => setLForm({...lForm,ot_hours:e.target.value})} /></div>
+              <div className="form-field"><label className="form-label">Holiday hours</label><input className="form-input" type="number" step="0.5" value={lForm.holiday_hours} onChange={e => setLForm({...lForm,holiday_hours:e.target.value})} /></div>
+            </>) })()}
             <div className="form-field span-2"><label className="form-label">Remarks</label><input className="form-input" value={lForm.remarks} onChange={e => setLForm({...lForm,remarks:e.target.value})} /></div>
           </div>
         </DrawerForm>

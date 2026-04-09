@@ -5,7 +5,7 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { getWorkers, addWorker, makeId } from '../../lib/mockStore'
+import { getWorkers, addWorkerWithC3Task, makeId } from '../../lib/mockStore'
 import { formatCurrency, getStatusTone } from '../../lib/utils'
 
 export default function WorkersPage() {
@@ -29,7 +29,7 @@ export default function WorkersPage() {
   const handleAdd = () => {
     const seq = String(workers.length + 1).padStart(4, '0')
     const worker = { ...form, id: makeId('w'), worker_number: `IWS-2026-${seq}`, status: 'Pre-employment', active: false, onboarding_status: 'Pre-employment', joining_date: null, leaving_date: null, blacklisted: false, monthly_salary: Number(form.monthly_salary)||0, hourly_rate: Number(form.hourly_rate)||0, fixed_allowance: Number(form.fixed_allowance)||0, subcontractor_billing_rate: Number(form.subcontractor_billing_rate)||0, subcontractor_cost_rate: Number(form.subcontractor_cost_rate)||0, ot_eligible: true, holiday_ot_eligible: true, leave_eligible: true }
-    addWorker(worker)
+    addWorkerWithC3Task(worker)
     setWorkers(getWorkers())
     setShowDrawer(false)
     setForm({ full_name:'', trade_role:'', category:'Direct Employee', nationality:'', passport_number:'', mobile_number:'', email:'', payroll_type:'monthly', monthly_salary:'', hourly_rate:'', fixed_allowance:'', project_site:'', visa_company:'Innovation Technologies', subcontractor_company:'', subcontractor_billing_rate:'', subcontractor_cost_rate:'' })

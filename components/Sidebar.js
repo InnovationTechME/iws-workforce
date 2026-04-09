@@ -1,12 +1,14 @@
 'use client'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { getCurrentRole, getRoleLabel, canAccess } from '../lib/mockAuth'
+import { getRole, canAccess } from '../lib/mockAuth'
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', module: 'dashboard' },
   { href: '/offers', label: 'Offers', module: 'offers' },
   { href: '/onboarding', label: 'Onboarding', module: 'onboarding' },
+  { href: '/offboarding-exit', label: 'Offboarding', module: 'offboarding-exit' },
   { href: '/workers', label: 'Workers', module: 'workers' },
   { href: '/documents', label: 'Documents', module: 'documents' },
   { href: '/certifications', label: 'Certifications', module: 'certifications' },
@@ -22,9 +24,16 @@ const navItems = [
 
 export default function Sidebar({ alertDots = {} }) {
   const pathname = usePathname()
-  const role = getCurrentRole()
-  const roleLabel = getRoleLabel()
-  const visibleItems = navItems.filter(item => canAccess(item.module))
+  const [role, setRoleState] = useState('owner')
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    setRoleState(getRole())
+  }, [])
+
+  const roleLabel = role === 'owner' ? 'Owner' : role === 'hr_admin' ? 'HR Admin' : 'Operations'
+  const visibleItems = mounted ? navItems.filter(item => canAccess(item.module)) : navItems
 
   return (
     <aside className="sidebar">
@@ -37,9 +46,11 @@ export default function Sidebar({ alertDots = {} }) {
           <div style={{fontSize:9,color:'var(--muted)',lineHeight:1.4}}>Workforce System</div>
         </div>
       </div>
-      <div style={{padding:'6px 16px'}}>
-        <div className="role-chip">{roleLabel}</div>
-      </div>
+      {mounted && (
+        <div style={{padding:'6px 16px'}}>
+          <div className="role-chip">{roleLabel}</div>
+        </div>
+      )}
       <nav className="nav-section">
         {visibleItems.map(item => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
@@ -53,7 +64,7 @@ export default function Sidebar({ alertDots = {} }) {
         })}
       </nav>
       <div className="sidebar-footer">
-        <div className="sidebar-footer-user">Logged in as {roleLabel}</div>
+        {mounted && <div className="sidebar-footer-user">Logged in as {roleLabel}</div>}
         <Link href="/">Switch Role</Link>
       </div>
     </aside>
