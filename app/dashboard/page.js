@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
 import { getDashboardMetrics, getInboxItems } from '../../lib/mockStore'
 import { formatDate } from '../../lib/utils'
+import { getRole } from '../../lib/mockAuth'
+import ApprovalsDashboard from '../../components/ApprovalsDashboard'
 
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState(null)
@@ -87,6 +89,8 @@ export default function DashboardPage() {
           <div style={{fontSize:11,color:'var(--warning)',marginTop:6,fontWeight:500}}>Ready for review</div>
         </div>
       </div>
+
+      <ApprovalsDashboard />
 
       <div style={{marginBottom:8}}>
         <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:10}}>Action Queue — Priority Order</div>

@@ -1,5 +1,5 @@
 export const mockPayrollBatches = [
-  { id:'pb-2026-04', month:'2026-04', month_label:'April 2026', status:'Ready for review', distribution_status:'No C3 handoff yet', created_at:'2026-04-08' }
+  { id:'pb-2026-04', month:'2026-04', month_label:'April 2026', status:'Ready for review', distribution_status:'No C3 handoff yet', created_at:'2026-04-08', generated_by:'HR Admin', generated_at:'2026-04-05T09:00:00Z', operations_approval_status:'pending', operations_approved_by:null, operations_approved_at:null, operations_rejection_reason:null, owner_approval_status:'pending', owner_approved_by:null, owner_approved_at:null, owner_rejection_reason:null, can_distribute:false }
 ]
 export const mockPayrollLines = [
   { id:'pl-001', batch_id:'pb-2026-04', worker_id:'w-001', worker_name:'Arun Kumar', worker_number:'IWS-2026-0001', category:'Direct Employee', payroll_type:'monthly', rate_or_salary:6200, normal_hours:168, ot_hours:4, holiday_hours:2, normal_pay:6200, ot_pay:129.17, holiday_ot_pay:103.33, allowances_total:700, deductions_total:120, advances_total:250, gross_pay:7132.5, net_pay:6762.5, payslip_url:null, payslip_sent:false, c3_status:'Not ready', policy_note:'Monthly staff OT at draft internal rate' },

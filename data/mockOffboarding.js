@@ -19,6 +19,14 @@ export const mockOffboarding = [
       labour_card_cancelled: { done: false, done_by: null, done_at: null },
       experience_letter_issued: { done: true, done_by: 'HR Admin', done_at: '2026-03-05' },
     },
-    notes: 'Worker resigned voluntarily. All items cleared except labour card cancellation pending MOL.'
+    notes: 'Worker resigned voluntarily. All items cleared except labour card cancellation pending MOL.',
+    termination_type: 'resignation',
+    requires_operations_approval: true,
+    operations_approval_status: 'approved',
+    operations_approved_by: 'Operations',
+    requires_owner_approval: true,
+    owner_approval_status: 'approved',
+    owner_approved_by: 'Owner',
+    can_proceed_with_exit: true
   }
 ]
