@@ -29,18 +29,8 @@ export default function Sidebar({ alertDots = {} }) {
   return (
     <aside className="sidebar">
       <div style={{padding:'16px 16px 12px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10}}>
-        <svg width="32" height="38" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="sg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#06b6d4"/><stop offset="100%" stopColor="#10b981"/></linearGradient>
-            <linearGradient id="sg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#06b6d4"/><stop offset="100%" stopColor="#0d9488"/></linearGradient>
-            <linearGradient id="sg3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#06b6d4"/><stop offset="100%" stopColor="#10b981"/></linearGradient>
-            <linearGradient id="sg4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981"/><stop offset="100%" stopColor="#0d9488"/></linearGradient>
-          </defs>
-          <circle cx="38" cy="12" r="10" fill="url(#sg1)"/>
-          <rect x="20" y="28" width="16" height="70" rx="8" fill="url(#sg2)"/>
-          <path d="M36 28 L80 98 L80 28" stroke="url(#sg3)" strokeWidth="16" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-          <rect x="72" y="28" width="16" height="70" rx="8" fill="url(#sg4)"/>
-        </svg>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo.png" alt="Innovation Technologies" style={{width:36,height:36,objectFit:'contain',flexShrink:0}} />
         <div>
           <div style={{fontSize:13,fontWeight:700,color:'var(--teal)',lineHeight:1.2}}>Innovation</div>
           <div style={{fontSize:11,fontWeight:600,color:'var(--text)',lineHeight:1.2}}>Technologies</div>
