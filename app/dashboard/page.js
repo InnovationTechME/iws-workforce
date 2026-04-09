@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
-import { getDashboardMetrics, getInboxItems, getPendingApprovalsForRole, getWorkerDisplay } from '../../lib/mockStore'
+import { getDashboardMetrics, getInboxItems, getPendingApprovalsForRole, getWorkerDisplay, getAbsentToday, getAbsencePercentage } from '../../lib/mockStore'
 import { formatDate } from '../../lib/utils'
 import { getRole } from '../../lib/mockAuth'
 
@@ -66,13 +66,12 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div style={{background: (inbox.leaveRequests?.filter(l=>l.status==='pending').length||0) > 0 ? '#fff1f2':'#f0fdf4', border:'1.5px solid '+((inbox.leaveRequests?.filter(l=>l.status==='pending').length||0)>0?'#fca5a5':'#86efac'),borderRadius:12,padding:'20px 20px',cursor:'pointer'}} onClick={()=>router.push('/attendance')}>
+        {(() => { const absentCount = getAbsentToday().length; const pct = getAbsencePercentage(); return (
+        <div style={{background:absentCount>0?'#fff1f2':'#f0fdf4',border:'1.5px solid '+(absentCount>0?'#fca5a5':'#86efac'),borderRadius:12,padding:'20px 20px',cursor:'pointer'}} onClick={()=>router.push('/attendance')}>
           <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:4}}>Absent Today</div>
-          <div style={{fontSize:40,fontWeight:800,color:(inbox.leaveRequests?.filter(l=>l.status==='pending').length||0)>0?'#dc2626':'#16a34a',lineHeight:1}}>
-            {inbox.leaveRequests?.filter(l=>l.status==='pending').length||0}
-          </div>
-          <div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>Pending leave requests</div>
-        </div>
+          <div style={{fontSize:40,fontWeight:800,color:absentCount>0?'#dc2626':'#16a34a',lineHeight:1}}>{absentCount}</div>
+          <div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>{pct}% absence rate</div>
+        </div>)})()}
 
         <div style={{background:'#fff',border:'1.5px solid var(--border)',borderRadius:12,padding:'20px 20px',cursor:'pointer'}} onClick={()=>router.push('/inbox')}>
           <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:4}}>HR Inbox</div>
