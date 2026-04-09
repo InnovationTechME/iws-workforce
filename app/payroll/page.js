@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
-import { getPayrollBatch, getPayrollLines, updatePayrollBatch, getPayrollLine, addPayrollAdjustment, updatePayrollLine, getPenaltyDeductions, confirmPenaltyDeduction, removePenaltyDeduction } from '../../lib/mockStore'
+import { getPayrollBatch, getPayrollLines, updatePayrollBatch, getPayrollLine, addPayrollAdjustment, updatePayrollLine, getPenaltyDeductions, confirmPenaltyDeduction, removePenaltyDeduction, getRamadanMode } from '../../lib/mockStore'
 import { formatCurrency, getStatusTone } from '../../lib/utils'
 import { canAccess } from '../../lib/mockAuth'
 
@@ -33,6 +33,12 @@ export default function PayrollPage() {
   const gross = lines.reduce((s,l) => s + l.gross_pay, 0)
   const net = lines.reduce((s,l) => s + l.net_pay, 0)
   const deductions = lines.reduce((s,l) => s + l.deductions_total + l.advances_total, 0)
+  const ramadanActive = getRamadanMode()?.active
+  const wpsTotals = {
+    wps: lines.filter(l => !l.payment_method || l.payment_method === 'WPS').reduce((s,l) => s + l.net_pay, 0),
+    nonWps: lines.filter(l => l.payment_method === 'Non-WPS').reduce((s,l) => s + l.net_pay, 0),
+    cash: lines.filter(l => l.payment_method === 'Cash').reduce((s,l) => s + l.net_pay, 0),
+  }
 
   const handleStatusUpdate = (status) => {
     updatePayrollBatch({ status })
@@ -67,6 +73,21 @@ export default function PayrollPage() {
         <div className="stat-card"><div className="num" style={{fontSize:20}}>{lines.length}</div><div className="lbl">Workers on batch</div></div>
       </div>
 
+      {ramadanActive && (
+        <div style={{background:'linear-gradient(135deg,#7c3aed,#4f46e5)',color:'white',borderRadius:8,padding:'10px 16px',marginBottom:16,fontSize:13,fontWeight:500}}>
+          🌙 Ramadan Mode Active — OT threshold: 6hrs · Minimum attendance: 5hrs
+        </div>
+      )}
+
+      <div style={{display:'flex',gap:12,marginBottom:16}}>
+        {[['WPS (Endered)', wpsTotals.wps, '🏦'],['Non-WPS (Cash/Transfer)', wpsTotals.nonWps, '💵'],['Cash (Pending C3)', wpsTotals.cash, '⚠']].map(([label, amount, icon]) => (
+          <div key={label} style={{flex:1,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,padding:'12px 16px'}}>
+            <div style={{fontSize:11,color:'var(--muted)',fontWeight:600,marginBottom:4}}>{icon} {label}</div>
+            <div style={{fontSize:18,fontWeight:700,color:'var(--teal)'}}>AED {amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+          </div>
+        ))}
+      </div>
+
       <div style={{display:'grid',gridTemplateColumns:'1fr 340px',gap:16}}>
         <div className="panel">
           <div className="tabs">
@@ -76,12 +97,13 @@ export default function PayrollPage() {
           </div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Worker</th><th>Type</th><th>Normal pay</th><th>OT pay</th><th>Allowances</th><th>Deductions</th><th>Net pay</th><th>C3</th></tr></thead>
+              <thead><tr><th>Worker</th><th>Type</th><th>Payment</th><th>Normal pay</th><th>OT pay</th><th>Allowances</th><th>Deductions</th><th>Net pay</th><th>C3</th></tr></thead>
               <tbody>
                 {filtered.map(l => (
                   <tr key={l.id} style={{cursor:'pointer',background:selected?.id===l.id?'#f0fdfa':''}} onClick={() => setSelected(l)}>
                     <td style={{fontWeight:500}}>{l.worker_name}<div style={{fontSize:11,color:'var(--hint)'}}>{l.worker_number}</div></td>
                     <td><StatusBadge label={l.payroll_type} tone="neutral" /></td>
+                    <td><StatusBadge label={l.payment_method||'WPS'} tone={l.payment_method==='Non-WPS'?'warning':l.payment_method==='Cash'?'danger':'success'} /></td>
                     <td style={{fontSize:12}}>{formatCurrency(l.normal_pay)}</td>
                     <td style={{fontSize:12}}>{formatCurrency(l.ot_pay)}</td>
                     <td style={{fontSize:12,color:'var(--success)'}}>{formatCurrency(l.allowances_total)}</td>

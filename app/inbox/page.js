@@ -54,6 +54,7 @@ export default function InboxPage() {
         <InboxPanel title="Pending timesheets" items={inbox.pendingTimesheets} tone="warning" linkHref="/timesheets" renderItem={t => <><span className="label">{t.client_name} · {t.job_no}</span><StatusBadge label={t.final_approval_status} tone="warning" /></>} />
         <InboxPanel title="Leave requests" items={inbox.leaveRequests} tone="warning" linkHref="/leave" renderItem={l => <><span className="label">{l.worker_name} · {l.leave_type}</span><StatusBadge label="pending" tone="warning" /></>} />
         <InboxPanel title="C3 card requests pending" items={inbox.pendingTasks || []} tone="warning" linkHref="/workers" renderItem={t => <><span className="label">{t.worker_name} · {t.worker_number}</span><StatusBadge label="C3 pending" tone="warning" /></>} />
+        <InboxPanel title="Timesheet discrepancies" items={inbox.pendingDiscrepancies || []} tone="danger" linkHref="/timesheet-reconcile" renderItem={d => <><span className="label">{d.iws_worker_name} · {Math.abs(d.difference)}h diff</span><StatusBadge label="pending" tone="danger" /></>} />
       </div>
     </AppShell>
   )

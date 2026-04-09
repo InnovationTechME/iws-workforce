@@ -1,6 +1,6 @@
 'use client'
 import Sidebar from './Sidebar'
-import { getInboxItems, getAttendance, getOffboarding } from '../lib/mockStore'
+import { getInboxItems, getAttendance, getOffboarding, getPendingDiscrepancies } from '../lib/mockStore'
 import { TODAY } from '../lib/utils'
 
 export default function AppShell({ children, pageTitle }) {
@@ -19,6 +19,7 @@ export default function AppShell({ children, pageTitle }) {
       timesheets: inbox.pendingTimesheets.length > 0 ? 'warning' : 'neutral',
       attendance: getAttendance().filter(a => a.date === TODAY && a.reason === 'absent_no_cert').length > 0 ? 'warning' : 'neutral',
       'offboarding-exit': offInProgress > 0 ? 'danger' : 'neutral',
+      'timesheet-reconcile': getPendingDiscrepancies().length > 0 ? 'danger' : 'neutral',
     }
   } catch(e) {}
   return (
