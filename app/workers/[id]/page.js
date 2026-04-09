@@ -8,7 +8,7 @@ import StatusBadge from '../../../components/StatusBadge'
 import LetterViewer from '../../../components/LetterViewer'
 import { getWorker, getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS } from '../../../lib/mockStore'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
-import { offerLetterHTML, warningLetterHTML, experienceLetterHTML } from '../../../lib/letterTemplates'
+import { offerLetterHTML, warningLetterHTML, experienceLetterHTML, terminationWithNoticeHTML, terminationWithoutNoticeHTML, resignationAcceptanceHTML, TERMINATION_GROUNDS_LIST } from '../../../lib/letterTemplates'
 
 export default function WorkerDetailPage() {
   const { id } = useParams()
@@ -21,6 +21,9 @@ export default function WorkerDetailPage() {
   const [viewerHtml, setViewerHtml] = useState(null)
   const [viewerRef, setViewerRef] = useState('')
   const [letterLang, setLetterLang] = useState('english')
+  const [showTerminationForm, setShowTerminationForm] = useState(false)
+  const [terminationType, setTerminationType] = useState('notice')
+  const [terminationDetails, setTerminationDetails] = useState({ notice_days:30, last_working_date:'', reason:'', reason_body:'', ground_key:'misconduct', additional_details:'', effective_date:new Date().toISOString().split('T')[0], resignation_date:'', notice_period:'60 days', additional_note:'' })
 
   useEffect(() => {
     const w = getWorker(id)
@@ -209,6 +212,47 @@ export default function WorkerDetailPage() {
               }}>+ Experience Letter</button>
             </div>
 
+            <div style={{marginTop:16,paddingTop:14,borderTop:'2px solid var(--border)'}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#dc2626',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:10}}>Exit & Termination Letters</div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:12}}>
+                <button style={{background:'#dc2626',color:'white',border:'none',borderRadius:6,padding:'8px 14px',fontSize:12,fontWeight:600,cursor:'pointer'}} onClick={() => { setTerminationType('notice'); setShowTerminationForm(true) }}>📋 Termination with Notice</button>
+                <button style={{background:'#7f1d1d',color:'white',border:'none',borderRadius:6,padding:'8px 14px',fontSize:12,fontWeight:600,cursor:'pointer'}} onClick={() => { setTerminationType('no_notice'); setShowTerminationForm(true) }}>⚠ Termination without Notice</button>
+                <button style={{background:'#16a34a',color:'white',border:'none',borderRadius:6,padding:'8px 14px',fontSize:12,fontWeight:600,cursor:'pointer'}} onClick={() => { setTerminationType('resignation'); setShowTerminationForm(true) }}>✉ Resignation Acceptance</button>
+              </div>
+              {showTerminationForm && (
+                <div style={{background:terminationType==='resignation'?'#f0fdf4':'#fff1f2',border:'1px solid '+(terminationType==='resignation'?'#86efac':'#fca5a5'),borderRadius:8,padding:16,marginBottom:12}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                    <div style={{fontSize:13,fontWeight:700,color:terminationType==='resignation'?'#166534':'#991b1b'}}>{terminationType==='notice'?'Termination with Notice (30 days)':terminationType==='no_notice'?'Termination without Notice — UAE Art. 44':'Resignation Acceptance'}</div>
+                    <button onClick={() => setShowTerminationForm(false)} style={{background:'transparent',border:'none',cursor:'pointer',fontSize:16,color:'#94a3b8'}}>✕</button>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                    {terminationType==='notice' && <><div className="form-field"><label className="form-label">Notice period (days) *</label><input className="form-input" type="number" value={terminationDetails.notice_days} onChange={e=>setTerminationDetails({...terminationDetails,notice_days:e.target.value})} /></div><div className="form-field"><label className="form-label">Last working date *</label><input className="form-input" type="date" value={terminationDetails.last_working_date} onChange={e=>setTerminationDetails({...terminationDetails,last_working_date:e.target.value})} /></div><div className="form-field"><label className="form-label">Reason</label><input className="form-input" value={terminationDetails.reason} onChange={e=>setTerminationDetails({...terminationDetails,reason:e.target.value})} /></div><div className="form-field span-2"><label className="form-label">Detailed reason</label><textarea className="form-textarea" rows={3} value={terminationDetails.reason_body} onChange={e=>setTerminationDetails({...terminationDetails,reason_body:e.target.value})} /></div></>}
+                    {terminationType==='no_notice' && <><div className="form-field"><label className="form-label">Ground *</label><select className="form-select" value={terminationDetails.ground_key} onChange={e=>setTerminationDetails({...terminationDetails,ground_key:e.target.value})}>{Object.entries(TERMINATION_GROUNDS_LIST).map(([key,g])=>(<option key={key} value={key}>{g.label} — {g.article}</option>))}</select></div><div className="form-field"><label className="form-label">Effective date *</label><input className="form-input" type="date" value={terminationDetails.effective_date} onChange={e=>setTerminationDetails({...terminationDetails,effective_date:e.target.value})} /></div><div className="form-field span-2"><label className="form-label">Additional details</label><textarea className="form-textarea" rows={3} value={terminationDetails.additional_details} onChange={e=>setTerminationDetails({...terminationDetails,additional_details:e.target.value})} /></div></>}
+                    {terminationType==='resignation' && <><div className="form-field"><label className="form-label">Resignation date *</label><input className="form-input" type="date" value={terminationDetails.resignation_date} onChange={e=>setTerminationDetails({...terminationDetails,resignation_date:e.target.value})} /></div><div className="form-field"><label className="form-label">Last working date *</label><input className="form-input" type="date" value={terminationDetails.last_working_date} onChange={e=>setTerminationDetails({...terminationDetails,last_working_date:e.target.value})} /></div><div className="form-field"><label className="form-label">Notice period</label><input className="form-input" value={terminationDetails.notice_period} onChange={e=>setTerminationDetails({...terminationDetails,notice_period:e.target.value})} /></div><div className="form-field span-2"><label className="form-label">Additional note</label><textarea className="form-textarea" rows={2} value={terminationDetails.additional_note} onChange={e=>setTerminationDetails({...terminationDetails,additional_note:e.target.value})} /></div></>}
+                  </div>
+                  <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:12}}>
+                    <button className="btn btn-secondary" onClick={() => setShowTerminationForm(false)}>Cancel</button>
+                    <button style={{background:terminationType==='resignation'?'#16a34a':'#dc2626',color:'white',border:'none',borderRadius:6,padding:'8px 18px',fontSize:13,fontWeight:600,cursor:'pointer'}} onClick={() => {
+                      try {
+                        const typeMap = {notice:'termination_notice',no_notice:'termination_no_notice',resignation:'resignation_acceptance'}
+                        const letterType = typeMap[terminationType]
+                        const ref = generateRefNumber(letterType)
+                        const today = new Date().toISOString().split('T')[0]
+                        let html = ''
+                        if (terminationType==='notice') html = terminationWithNoticeHTML(worker,terminationDetails,ref,today,letterLang)
+                        else if (terminationType==='no_notice') html = terminationWithoutNoticeHTML(worker,terminationDetails,ref,today,letterLang)
+                        else html = resignationAcceptanceHTML(worker,terminationDetails,ref,today,letterLang)
+                        addLetter({id:makeId('let'),ref_number:ref,letter_type:letterType,worker_id:worker.id,worker_name:worker.full_name,worker_number:worker.worker_number,language:letterLang,issued_date:today,issued_by:'HR Admin',linked_record_id:null,status:'issued',notes:terminationType==='no_notice'?TERMINATION_GROUNDS_LIST[terminationDetails.ground_key]?.label:''})
+                        setLetters(getLettersByWorker(worker.id))
+                        setViewerHtml(html); setViewerRef(ref); setShowTerminationForm(false)
+                      } catch(e) { alert('Error: ' + e.message) }
+                    }}>Generate & Preview Letter</button>
+                  </div>
+                  {terminationType==='no_notice' && <div style={{marginTop:10,padding:'8px 12px',background:'#fff',border:'1px solid #fca5a5',borderRadius:4,fontSize:11,color:'#991b1b'}}><strong>Legal note:</strong> {TERMINATION_GROUNDS_LIST[terminationDetails.ground_key]?.article} — {TERMINATION_GROUNDS_LIST[terminationDetails.ground_key]?.label}. {TERMINATION_GROUNDS_LIST[terminationDetails.ground_key]?.consequence}.</div>}
+                </div>
+              )}
+            </div>
+
             {letters.length === 0 ? (
               <div className="empty-state"><h3>No letters issued yet</h3><p>Use the buttons above to generate letters for this worker.</p></div>
             ) : (
@@ -217,8 +261,8 @@ export default function WorkerDetailPage() {
                   <thead><tr><th>Ref number</th><th>Type</th><th>Date</th><th>Language</th><th>Issued by</th><th>Actions</th></tr></thead>
                   <tbody>
                     {letters.map(l => {
-                      const typeLabels = { offer_letter:'Offer Letter', warning_1st:'1st Warning', warning_2nd:'2nd Warning', warning_final:'Final Warning', experience_letter:'Experience Letter', memo:'Memo' }
-                      const toneBg = { warning_1st:'#fef9c3', warning_2nd:'#fed7aa', warning_final:'#fee2e2', offer_letter:'#f0fdf4', experience_letter:'#eff6ff', memo:'#f8fafc' }
+                      const typeLabels = { offer_letter:'Offer Letter', warning_1st:'1st Warning', warning_2nd:'2nd Warning', warning_final:'Final Warning', experience_letter:'Experience Letter', memo:'Memo', termination_notice:'Termination (notice)', termination_no_notice:'Termination (no notice)', resignation_acceptance:'Resignation acceptance' }
+                      const toneBg = { warning_1st:'#fef9c3', warning_2nd:'#fed7aa', warning_final:'#fee2e2', offer_letter:'#f0fdf4', experience_letter:'#eff6ff', memo:'#f8fafc', termination_notice:'#fff1f2', termination_no_notice:'#fef2f2', resignation_acceptance:'#f0fdf4' }
                       const toneColor = { warning_1st:'#854d0e', warning_2nd:'#9a3412', warning_final:'#991b1b', offer_letter:'#166534', experience_letter:'#1e40af', memo:'#475569' }
                       return (
                         <tr key={l.id}>
@@ -236,6 +280,9 @@ export default function WorkerDetailPage() {
                                 html = warningLetterHTML(worker, w, l.ref_number, l.issued_date, l.letter_type, l.language)
                               }
                               else if (l.letter_type === 'experience_letter') html = experienceLetterHTML(worker, l.ref_number, l.issued_date, l.language)
+                              else if (l.letter_type === 'termination_notice') html = terminationWithNoticeHTML(worker, {notice_days:30,last_working_date:'—',reason:l.notes||'—',reason_body:''}, l.ref_number, l.issued_date, l.language)
+                              else if (l.letter_type === 'termination_no_notice') { const gk = Object.keys(TERMINATION_GROUNDS_LIST).find(k=>TERMINATION_GROUNDS_LIST[k].label===l.notes)||'misconduct'; html = terminationWithoutNoticeHTML(worker, {ground_key:gk,additional_details:'',effective_date:l.issued_date}, l.ref_number, l.issued_date, l.language) }
+                              else if (l.letter_type === 'resignation_acceptance') html = resignationAcceptanceHTML(worker, {resignation_date:'—',last_working_date:'—',notice_period:'60 days'}, l.ref_number, l.issued_date, l.language)
                               setViewerHtml(html); setViewerRef(l.ref_number)
                             }}>View</button>
                           </td>
