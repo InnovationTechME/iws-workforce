@@ -6,7 +6,7 @@ import AppShell from '../../../components/AppShell'
 import PageHeader from '../../../components/PageHeader'
 import StatusBadge from '../../../components/StatusBadge'
 import LetterViewer from '../../../components/LetterViewer'
-import { getWorker, getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS, calculateLeaveBalance, getILOEStatus } from '../../../lib/mockStore'
+import { getWorker, getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS, calculateLeaveBalance, getILOEStatus, updateDocument, generateDocFileName } from '../../../lib/mockStore'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
 import { offerLetterHTML, warningLetterHTML, experienceLetterHTML, terminationWithNoticeHTML, terminationWithoutNoticeHTML, resignationAcceptanceHTML, TERMINATION_GROUNDS_LIST } from '../../../lib/letterTemplates'
 
@@ -21,6 +21,8 @@ export default function WorkerDetailPage() {
   const [viewerHtml, setViewerHtml] = useState(null)
   const [viewerRef, setViewerRef] = useState('')
   const [letterLang, setLetterLang] = useState('english')
+  const [selectedDoc, setSelectedDoc] = useState(null)
+  const [docForm, setDocForm] = useState({ issue_date:'', expiry_date:'', file_name:null, file_original:null, notes:'' })
   const [showTerminationForm, setShowTerminationForm] = useState(false)
   const [terminationType, setTerminationType] = useState('notice')
   const [terminationDetails, setTerminationDetails] = useState({ notice_days:30, last_working_date:'', reason:'', reason_body:'', ground_key:'misconduct', additional_details:'', effective_date:new Date().toISOString().split('T')[0], resignation_date:'', notice_period:'60 days', additional_note:'' })
@@ -152,21 +154,91 @@ export default function WorkerDetailPage() {
         )}
 
         {tab === 'documents' && (
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Type</th><th>Category</th><th>Issue date</th><th>Expiry</th><th>Status</th></tr></thead>
-              <tbody>
-                {docs.length === 0 ? <tr><td colSpan={5} style={{textAlign:'center',color:'var(--hint)',padding:32}}>No documents recorded</td></tr> : docs.map(d => (
-                  <tr key={d.id}>
-                    <td style={{fontWeight:500}}>{d.document_type}</td>
-                    <td><StatusBadge label={d.document_category} tone="neutral" /></td>
-                    <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(d.issue_date)}</td>
-                    <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(d.expiry_date)}</td>
-                    <td><StatusBadge label={d.status} tone={getStatusTone(d.status)} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Type</th><th>Category</th><th>Issue date</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                  {docs.length === 0 ? <tr><td colSpan={6} style={{textAlign:'center',color:'var(--hint)',padding:32}}>No documents recorded</td></tr> : docs.map(d => (
+                    <tr key={d.id} style={{cursor:'pointer'}} onClick={() => { setSelectedDoc(d); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:'', file_name:null, file_original:null, notes:'' }) }}>
+                      <td style={{fontWeight:500}}>{d.document_type}</td>
+                      <td><StatusBadge label={d.document_category} tone="neutral" /></td>
+                      <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(d.issue_date)}</td>
+                      <td style={{fontSize:12,color:d.status==='expired'?'var(--danger)':d.status==='expiring_soon'?'var(--warning)':'var(--muted)'}}>{formatDate(d.expiry_date)}</td>
+                      <td><StatusBadge label={d.status} tone={getStatusTone(d.status)} /></td>
+                      <td style={{fontSize:11,color:'var(--hint)'}}>📎 Click to view / update</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Document drawer */}
+            {selectedDoc && (
+              <div style={{position:'fixed',inset:0,zIndex:50,display:'flex',justifyContent:'flex-end'}} onClick={() => setSelectedDoc(null)}>
+                <div style={{position:'absolute',inset:0,background:'rgba(15,23,42,.2)',backdropFilter:'blur(2px)'}} />
+                <div style={{position:'relative',width:420,height:'100vh',background:'#fff',borderLeft:'0.5px solid var(--border)',padding:24,overflowY:'auto',display:'flex',flexDirection:'column',gap:16,boxShadow:'-8px 0 32px rgba(15,23,42,.08)'}} onClick={e => e.stopPropagation()}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',paddingBottom:16,borderBottom:'0.5px solid var(--border)'}}>
+                    <div>
+                      <div style={{fontSize:15,fontWeight:600}}>{selectedDoc.document_type}</div>
+                      <div style={{fontSize:12,color:'var(--muted)',marginTop:3}}>{worker.full_name} · {worker.worker_number}</div>
+                    </div>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setSelectedDoc(null)}>✕</button>
+                  </div>
+
+                  {/* Section A — Current info */}
+                  <div>
+                    <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',marginBottom:8}}>Current Document</div>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                      <div><div style={{fontSize:11,color:'var(--hint)'}}>Category</div><StatusBadge label={selectedDoc.document_category} tone="neutral" /></div>
+                      <div><div style={{fontSize:11,color:'var(--hint)'}}>Status</div><StatusBadge label={selectedDoc.status} tone={getStatusTone(selectedDoc.status)} /></div>
+                      <div><div style={{fontSize:11,color:'var(--hint)'}}>Issue date</div><div style={{fontSize:13,fontWeight:500}}>{formatDate(selectedDoc.issue_date)}</div></div>
+                      <div><div style={{fontSize:11,color:'var(--hint)'}}>Expiry date</div><div style={{fontSize:13,fontWeight:500,color:selectedDoc.status==='expired'?'var(--danger)':selectedDoc.status==='expiring_soon'?'var(--warning)':'var(--text)'}}>{formatDate(selectedDoc.expiry_date)}</div></div>
+                    </div>
+                    {selectedDoc.file_name ? (
+                      <div style={{marginTop:10,padding:'8px 12px',background:'var(--success-bg)',border:'1px solid var(--success-border)',borderRadius:6,fontSize:12}}>
+                        <span style={{color:'var(--success)'}}>📎 {selectedDoc.file_name}</span>
+                      </div>
+                    ) : (
+                      <div style={{marginTop:10,padding:'8px 12px',background:'var(--warning-bg)',border:'1px solid var(--warning-border)',borderRadius:6,fontSize:12,color:'var(--warning)'}}>No file uploaded yet</div>
+                    )}
+                  </div>
+
+                  {/* Section B — Upload / update */}
+                  <div>
+                    <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',marginBottom:8}}>Upload New Version</div>
+                    <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                      <div className="form-field">
+                        <label className="form-label">File</label>
+                        <input type="file" className="form-input" accept=".pdf,.jpg,.jpeg,.png" onChange={e => {
+                          const file = e.target.files[0]
+                          if (!file) return
+                          const ext = file.name.split('.').pop()
+                          const autoName = generateDocFileName(worker, selectedDoc.document_type, ext)
+                          setDocForm({...docForm, file_name:autoName, file_original:file.name})
+                        }} />
+                        {docForm.file_name && <div style={{fontSize:11,color:'var(--teal)',marginTop:4}}>📎 {docForm.file_name}{docForm.file_original && docForm.file_original !== docForm.file_name ? <span style={{color:'var(--hint)',marginLeft:6}}>({docForm.file_original})</span> : ''}</div>}
+                      </div>
+                      <div className="form-grid">
+                        <div className="form-field"><label className="form-label">New issue date</label><input className="form-input" type="date" value={docForm.issue_date} onChange={e => setDocForm({...docForm, issue_date:e.target.value})} /></div>
+                        <div className="form-field"><label className="form-label">New expiry date *</label><input className="form-input" type="date" value={docForm.expiry_date} onChange={e => setDocForm({...docForm, expiry_date:e.target.value})} /></div>
+                      </div>
+                      <div className="form-field"><label className="form-label">Notes</label><textarea className="form-textarea" value={docForm.notes} onChange={e => setDocForm({...docForm, notes:e.target.value})} rows={2} /></div>
+                      <button className="btn btn-primary" onClick={() => {
+                        if (!docForm.expiry_date) { alert('Expiry date is required'); return }
+                        const today = new Date()
+                        const exp = new Date(docForm.expiry_date)
+                        const daysUntil = Math.ceil((exp - today) / (1000*60*60*24))
+                        const newStatus = daysUntil < 0 ? 'expired' : daysUntil <= 30 ? 'expiring_soon' : 'valid'
+                        updateDocument(selectedDoc.id, { issue_date:docForm.issue_date, expiry_date:docForm.expiry_date, file_name:docForm.file_name||selectedDoc.file_name, notes:docForm.notes, status:newStatus })
+                        setDocs(getDocumentsByWorker(id))
+                        setSelectedDoc(null)
+                      }}>Save &amp; Update</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
