@@ -5,7 +5,7 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { getDocuments, addDocument, getWorkers, makeId } from '../../lib/mockStore'
+import { getDocuments, addDocument, getWorkers, makeId, getWorkerDisplay } from '../../lib/mockStore'
 import { formatDate, getStatusTone, getDocumentStatus, validateRequired, validateExpiryAfterIssue, validateDateNotPast } from '../../lib/utils'
 
 const DOCUMENT_TYPES = ['passport','emirates_id','visa','photo','cv','offer_letter','employment_contract','labour_contract','labour_card','labour_permit','medical_fitness','medical_insurance','workers_compensation','unemployment_insurance','bank_account_details','site_induction','safety_orientation','site_access_card','subcontractor_agreement','subcontractor_trade_licence','subcontractor_insurance','resignation_letter','termination_notice','eos_calculation','exit_clearance','final_payslip','experience_letter']
@@ -81,11 +81,11 @@ export default function DocumentsPage() {
         {filtered.length === 0 ? <div className="empty-state"><h3>No documents in this queue</h3><p>All clear for this category.</p></div> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Worker ID</th><th>Document type</th><th>Category</th><th>Issue date</th><th>Expiry</th><th>Status</th><th>Notes</th></tr></thead>
+              <thead><tr><th>Worker</th><th>Document type</th><th>Category</th><th>Issue date</th><th>Expiry</th><th>Status</th><th>Notes</th></tr></thead>
               <tbody>
                 {filtered.map(d => (
                   <tr key={d.id}>
-                    <td><Link href={`/workers/${d.worker_id}`} style={{color:'var(--teal)',fontWeight:500}}>{d.worker_id}</Link></td>
+                    <td>{(() => { const wi = getWorkerDisplay(d.worker_id); return <Link href={`/workers/${d.worker_id}`} style={{color:'var(--teal)'}}><div style={{fontWeight:500}}>{wi.name_primary}</div><div style={{fontSize:11,color:'var(--hint)'}}>{wi.id_secondary}</div></Link> })()}</td>
                     <td style={{fontWeight:500}}>{d.document_type}</td>
                     <td><StatusBadge label={d.document_category} tone="neutral" /></td>
                     <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(d.issue_date)}</td>

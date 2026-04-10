@@ -148,7 +148,7 @@ export default function DashboardPage() {
                 <tbody>
                   {inbox.expiredDocs?.slice(0,6).map(d=>{ const wi = getWorkerDisplay(d.worker_id); return (
                     <tr key={d.id} style={{cursor:'pointer',background:'#fff8f8'}} onClick={()=>router.push('/documents')}>
-                      <td><div style={{fontSize:12,fontWeight:600,color:'var(--teal)'}}>{wi.id}</div><div style={{fontSize:11,color:'var(--muted)'}}>{wi.name}</div></td>
+                      <td><div style={{fontWeight:500}}>{wi.name_primary}</div><div style={{fontSize:11,color:'var(--hint)'}}>{wi.id_secondary}</div></td>
                       <td style={{fontSize:12}}>{d.document_type}</td>
                       <td style={{fontSize:11,color:'#dc2626',fontWeight:500}}>{formatDate(d.expiry_date)}</td>
                     </tr>
@@ -166,7 +166,7 @@ export default function DashboardPage() {
                 <tbody>
                   {inbox.expiredCerts?.slice(0,6).map(c=>{ const wi = getWorkerDisplay(c.worker_id); return (
                     <tr key={c.id} style={{cursor:'pointer',background:'#fff8f8'}} onClick={()=>router.push('/certifications')}>
-                      <td><div style={{fontSize:12,fontWeight:600,color:'var(--teal)'}}>{wi.id}</div><div style={{fontSize:11,color:'var(--muted)'}}>{wi.name}</div></td>
+                      <td><div style={{fontWeight:500}}>{wi.name_primary}</div><div style={{fontSize:11,color:'var(--hint)'}}>{wi.id_secondary}</div></td>
                       <td style={{fontSize:12}}>{c.certification_type}</td>
                       <td style={{fontSize:11,color:'#dc2626',fontWeight:500}}>{formatDate(c.expiry_date)}</td>
                     </tr>

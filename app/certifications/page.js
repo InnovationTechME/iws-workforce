@@ -4,7 +4,7 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { getCertifications, addCertification, getWorkers, makeId } from '../../lib/mockStore'
+import { getCertifications, addCertification, getWorkers, makeId, getWorkerDisplay } from '../../lib/mockStore'
 import { formatDate, getStatusTone, validateRequired, validateDateNotPast } from '../../lib/utils'
 
 const CERT_TYPES = ['Working at Height','H2S Awareness','Confined Space Entry','First Aid','Welding Certificate','Rigger/Banksman','Scaffolder','Forklift Operator','IPAF/MEWP','Electrician Licence','BOSIET/HUET','Safety Officer','HSE Officer','Custom']
@@ -69,11 +69,11 @@ export default function CertificationsPage() {
         {current.length === 0 ? <div className="empty-state"><h3>No certifications in this queue</h3></div> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Worker ID</th><th>Certification</th><th>Issuer</th><th>Expiry</th><th>Renewal</th><th>Status</th></tr></thead>
+              <thead><tr><th>Worker</th><th>Certification</th><th>Issuer</th><th>Expiry</th><th>Renewal</th><th>Status</th></tr></thead>
               <tbody>
                 {current.map(c => (
                   <tr key={c.id}>
-                    <td style={{fontWeight:500,color:'var(--teal)'}}>{c.worker_id}</td>
+                    <td>{(() => { const wi = getWorkerDisplay(c.worker_id); return <><div style={{fontWeight:500,color:'var(--teal)'}}>{wi.name_primary}</div><div style={{fontSize:11,color:'var(--hint)'}}>{wi.id_secondary}</div></> })()}</td>
                     <td style={{fontWeight:500}}>{c.certification_type}</td>
                     <td style={{fontSize:12,color:'var(--muted)'}}>{c.issuer}</td>
                     <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(c.expiry_date)}</td>
