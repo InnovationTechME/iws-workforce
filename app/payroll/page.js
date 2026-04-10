@@ -23,8 +23,20 @@ export default function PayrollPage() {
   const [unlockReason, setUnlockReason] = useState('')
   const [showCorrection, setShowCorrection] = useState(false)
   const [correctionNote, setCorrectionNote] = useState('')
+  const [timesheetPayroll, setTimesheetPayroll] = useState(null)
 
   useEffect(() => {
+    // Check for pending timesheet data from upload page
+    if (typeof window !== 'undefined') {
+      const pending = localStorage.getItem('pending_timesheet_for_payroll')
+      if (pending) {
+        try {
+          const data = JSON.parse(pending)
+          setTimesheetPayroll(data)
+          localStorage.removeItem('pending_timesheet_for_payroll')
+        } catch(e) {}
+      }
+    }
     setRoleState(getRole())
     const batches = getAllPayrollBatches()
     setAllBatches(batches)
@@ -155,6 +167,39 @@ export default function PayrollPage() {
           </div>
         ))}
       </div>
+
+      {/* Timesheet Payroll Preview */}
+      {timesheetPayroll && (
+        <div className="panel" style={{marginBottom:16,border:'2px solid var(--teal-border)',background:'var(--teal-bg)'}}>
+          <div className="panel-header"><div><h2>📊 Payroll from Timesheet — {timesheetPayroll.month} {timesheetPayroll.year}</h2><p>Client: {timesheetPayroll.client} · {timesheetPayroll.workers?.length || 0} workers</p></div><button className="btn btn-ghost btn-sm" onClick={() => setTimesheetPayroll(null)}>✕ Dismiss</button></div>
+          <div className="table-wrap"><table>
+            <thead><tr><th>Worker</th><th>Total Hrs</th><th>Regular</th><th>OT</th><th>Basic</th><th>OT Pay</th><th>Allowances</th><th>ILOE</th><th>Net Pay</th></tr></thead>
+            <tbody>{(timesheetPayroll.workers||[]).map((w, i) => {
+              const worker = getWorkers().find(wk => wk.id === w.worker_id)
+              if (!worker) return null
+              const hourlyRate = worker.monthly_salary / 208
+              const otPay = Math.round(w.ot_hours * hourlyRate * 1.25 * 100) / 100
+              const allowances = (worker.housing_allowance||0) + (worker.transport_allowance||0) + (worker.food_allowance||0)
+              const iloe = worker.iloe_monthly_deduction || 0
+              const gross = worker.monthly_salary + allowances + otPay
+              const net = Math.round((gross - iloe) * 100) / 100
+              return (
+                <tr key={i}>
+                  <td style={{fontWeight:500}}>{w.worker_name}<div style={{fontSize:11,color:'var(--hint)'}}>{w.worker_number}</div></td>
+                  <td style={{fontWeight:600}}>{w.total_hours}h</td>
+                  <td>{w.regular_hours}h</td>
+                  <td style={{color:w.ot_hours>0?'var(--warning)':'var(--hint)',fontWeight:w.ot_hours>0?600:400}}>{w.ot_hours}h</td>
+                  <td style={{fontSize:12}}>AED {worker.monthly_salary?.toLocaleString()}</td>
+                  <td style={{fontSize:12,color:'var(--success)'}}>{otPay > 0 ? 'AED '+otPay.toLocaleString() : '—'}</td>
+                  <td style={{fontSize:12}}>AED {allowances.toLocaleString()}</td>
+                  <td style={{fontSize:12,color:'var(--danger)'}}>-{iloe}</td>
+                  <td style={{fontWeight:700,color:'var(--teal)'}}>AED {net.toLocaleString()}</td>
+                </tr>
+              )
+            })}</tbody>
+          </table></div>
+        </div>
+      )}
 
       {/* Office Staff */}
       <div className="panel" style={{marginBottom:16}}>
