@@ -173,15 +173,16 @@ export default function PayrollPage() {
         <div className="panel" style={{marginBottom:16,border:'2px solid var(--teal-border)',background:'var(--teal-bg)'}}>
           <div className="panel-header"><div><h2>📊 Payroll from Timesheet — {timesheetPayroll.month} {timesheetPayroll.year}</h2><p>Client: {timesheetPayroll.client} · {timesheetPayroll.workers?.length || 0} workers</p></div><button className="btn btn-ghost btn-sm" onClick={() => setTimesheetPayroll(null)}>✕ Dismiss</button></div>
           <div className="table-wrap"><table>
-            <thead><tr><th>Worker</th><th>Total Hrs</th><th>Regular</th><th>OT</th><th>Basic</th><th>OT Pay</th><th>Allowances</th><th>ILOE</th><th>Net Pay</th></tr></thead>
+            <thead><tr><th>Worker</th><th>Total Hrs</th><th>Regular</th><th>OT</th><th>Holiday</th><th>Basic</th><th>OT Pay</th><th>Holiday Pay</th><th>Allowances</th><th>ILOE</th><th>Net Pay</th></tr></thead>
             <tbody>{(timesheetPayroll.workers||[]).map((w, i) => {
               const worker = getWorkers().find(wk => wk.id === w.worker_id)
               if (!worker) return null
-              const hourlyRate = worker.monthly_salary / 208
-              const otPay = Math.round(w.ot_hours * hourlyRate * 1.25 * 100) / 100
+              const baseHourlyRate = worker.monthly_salary / 30 / 8
+              const weekdayOtPay = Math.round(w.ot_hours * baseHourlyRate * 1.25 * 100) / 100
+              const holidayOtPay = Math.round((w.holiday_hours||0) * baseHourlyRate * 1.50 * 100) / 100
               const allowances = (worker.housing_allowance||0) + (worker.transport_allowance||0) + (worker.food_allowance||0)
               const iloe = worker.iloe_monthly_deduction || 0
-              const gross = worker.monthly_salary + allowances + otPay
+              const gross = worker.monthly_salary + allowances + weekdayOtPay + holidayOtPay
               const net = Math.round((gross - iloe) * 100) / 100
               return (
                 <tr key={i}>
@@ -189,8 +190,10 @@ export default function PayrollPage() {
                   <td style={{fontWeight:600}}>{w.total_hours}h</td>
                   <td>{w.regular_hours}h</td>
                   <td style={{color:w.ot_hours>0?'var(--warning)':'var(--hint)',fontWeight:w.ot_hours>0?600:400}}>{w.ot_hours}h</td>
+                  <td style={{color:(w.holiday_hours||0)>0?'var(--danger)':'var(--hint)',fontWeight:(w.holiday_hours||0)>0?600:400}}>{w.holiday_hours||0}h</td>
                   <td style={{fontSize:12}}>AED {worker.monthly_salary?.toLocaleString()}</td>
-                  <td style={{fontSize:12,color:'var(--success)'}}>{otPay > 0 ? 'AED '+otPay.toLocaleString() : '—'}</td>
+                  <td style={{fontSize:12,color:'var(--success)'}}>{weekdayOtPay > 0 ? 'AED '+weekdayOtPay.toLocaleString() : '—'}</td>
+                  <td style={{fontSize:12,color:'var(--danger)'}}>{holidayOtPay > 0 ? 'AED '+holidayOtPay.toLocaleString() : '—'}</td>
                   <td style={{fontSize:12}}>AED {allowances.toLocaleString()}</td>
                   <td style={{fontSize:12,color:'var(--danger)'}}>-{iloe}</td>
                   <td style={{fontWeight:700,color:'var(--teal)'}}>AED {net.toLocaleString()}</td>

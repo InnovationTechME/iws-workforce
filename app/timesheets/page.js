@@ -5,7 +5,7 @@ import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import TimesheetCalendar from '../../components/TimesheetCalendar'
 import DrawerForm from '../../components/DrawerForm'
-import { getTimesheetHeaders, getTimesheetLines, addTimesheetHeader, addTimesheetLine, updateTimesheetHeader, getWorkers, makeId } from '../../lib/mockStore'
+import { getTimesheetHeaders, getTimesheetLines, addTimesheetHeader, addTimesheetLine, updateTimesheetHeader, getWorkers, makeId, calculateHourlyPay, getWorker } from '../../lib/mockStore'
 import { formatDate } from '../../lib/utils'
 import { parseClientTimesheet, validateTimesheetMonth } from '../../lib/excelParser'
 import { getActiveClients } from '../../data/mockClients'
@@ -70,15 +70,28 @@ export default function TimesheetsPage() {
 
   const handleSaveAndPayroll = () => {
     const id = makeId('ts')
-    addTimesheetHeader({ id, client_name:selectedClient, project_site:selectedClient, vessel_name:'', job_no:selectedClient+'-'+selectedMonth.slice(0,3)+'-'+selectedYear, date:selectedYear+'-'+String(MONTHS.indexOf(selectedMonth)+1).padStart(2,'0')+'-01', source_type:'excel', source_file_name:uploadedFile?.name||'upload', hr_check_status:'pending', operations_check_status:'pending', final_approval_status:'pending', reconciliation_status:'pending' })
+    const monthIdx = MONTHS.indexOf(selectedMonth) + 1
+    const monthStr = String(monthIdx).padStart(2, '0')
+    addTimesheetHeader({ id, client_name:selectedClient, project_site:selectedClient, vessel_name:'', job_no:selectedClient+'-'+selectedMonth.slice(0,3)+'-'+selectedYear, date:selectedYear+'-'+monthStr+'-01', source_type:'excel', source_file_name:uploadedFile?.name||'upload', hr_check_status:'pending', operations_check_status:'pending', final_approval_status:'pending', reconciliation_status:'pending' })
     const payrollData = []
     matchedWorkers.filter(w => w.matched).forEach(w => {
-      let regHrs = 0, otHrs = 0
-      w.daily_hours.forEach(h => { if (h <= 8) regHrs += h; else { regHrs += 8; otHrs += (h-8) } })
-      addTimesheetLine({ id:makeId('tl'), header_id:id, worker_id:w.iws_worker_id, worker_name:w.iws_worker_name||w.worker_name, worker_number:w.iws_worker_number||'', trade_role:w.trade||'', work_date:selectedYear+'-'+String(MONTHS.indexOf(selectedMonth)+1).padStart(2,'0')+'-01', start_time:'07:00', end_time:'17:00', total_hours:regHrs+otHrs, normal_hours:regHrs, ot_hours:otHrs, holiday_hours:0, remarks:'Imported from client Excel' })
-      payrollData.push({ worker_id:w.iws_worker_id, worker_name:w.iws_worker_name, worker_number:w.iws_worker_number, total_hours:regHrs+otHrs, regular_hours:regHrs, ot_hours:otHrs, daily_hours:w.daily_hours })
+      const worker = getWorker(w.iws_worker_id)
+      if (!worker) return
+      let totalNormal = 0, totalOt = 0, totalHoliday = 0, totalPay = 0
+      // One timesheet line per working day
+      w.daily_hours.forEach((hrs, dayIdx) => {
+        if (!hrs || hrs <= 0) return
+        const day = String(dayIdx + 1).padStart(2, '0')
+        const dateStr = selectedYear + '-' + monthStr + '-' + day
+        const calc = calculateHourlyPay(worker, dateStr, hrs)
+        totalNormal += calc.normal_hours
+        totalOt += calc.ot_hours
+        totalHoliday += (calc.holiday_hours || 0)
+        totalPay += calc.pay
+        addTimesheetLine({ id:makeId('tl'), header_id:id, worker_id:w.iws_worker_id, worker_name:w.iws_worker_name||w.worker_name, worker_number:w.iws_worker_number||'', trade_role:w.trade||worker.trade_role||'', work_date:dateStr, start_time:'07:00', end_time:String(7+Math.floor(hrs)).padStart(2,'0')+':00', total_hours:hrs, normal_hours:calc.normal_hours, ot_hours:calc.ot_hours, holiday_hours:calc.holiday_hours||0, remarks:'Imported from client Excel' })
+      })
+      payrollData.push({ worker_id:w.iws_worker_id, worker_name:w.iws_worker_name, worker_number:w.iws_worker_number, total_hours:Math.round((totalNormal+totalOt+totalHoliday)*100)/100, regular_hours:Math.round(totalNormal*100)/100, ot_hours:Math.round(totalOt*100)/100, holiday_hours:Math.round(totalHoliday*100)/100, additional_pay:Math.round(totalPay*100)/100 })
     })
-    // Store for payroll page
     if (typeof window !== 'undefined') {
       localStorage.setItem('pending_timesheet_for_payroll', JSON.stringify({ month:selectedMonth, year:selectedYear, client:selectedClient, workers:payrollData, uploaded_date:new Date().toISOString() }))
     }
