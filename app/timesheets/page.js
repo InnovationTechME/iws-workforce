@@ -36,7 +36,7 @@ export default function TimesheetsPage() {
 
   const handleAddLine = () => {
     const worker = workers.find(w => w.id === lForm.worker_id)
-    const isFlat = worker?.category === 'Contracted Hourly Worker' || worker?.category === 'Subcontractor'
+    const isFlat = worker?.category === 'Contract Worker' || worker?.category === 'Subcontract Worker'
     const start = lForm.start_time.split(':').map(Number)
     const end = lForm.end_time.split(':').map(Number)
     const total = (end[0]*60+end[1] - start[0]*60-start[1]) / 60
@@ -143,7 +143,7 @@ export default function TimesheetsPage() {
             <div className="form-field"><label className="form-label">Work date</label><input className="form-input" type="date" value={lForm.work_date} onChange={e => setLForm({...lForm,work_date:e.target.value})} /></div>
             <div className="form-field"><label className="form-label">Start time</label><input className="form-input" type="time" value={lForm.start_time} onChange={e => setLForm({...lForm,start_time:e.target.value})} /></div>
             <div className="form-field"><label className="form-label">End time</label><input className="form-input" type="time" value={lForm.end_time} onChange={e => setLForm({...lForm,end_time:e.target.value})} /></div>
-            {(() => { const sw = workers.find(w=>w.id===lForm.worker_id); const flat = sw?.category==='Contracted Hourly Worker'||sw?.category==='Subcontractor'; return flat ? (
+            {(() => { const sw = workers.find(w=>w.id===lForm.worker_id); const flat = sw?.category==='Contract Worker'||sw?.category==='Subcontractor'; return flat ? (
               <div className="notice info" style={{fontSize:12,gridColumn:'span 2'}}>ℹ Contracted hourly / subcontractor — flat rate only. All hours billed at AED {sw?.hourly_rate}/hr. No OT premium applied.</div>
             ) : (<>
               <div className="form-field"><label className="form-label">OT hours override</label><input className="form-input" type="number" step="0.5" value={lForm.ot_hours} onChange={e => setLForm({...lForm,ot_hours:e.target.value})} /></div>

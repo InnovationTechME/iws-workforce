@@ -69,7 +69,7 @@ export default function PayrollPage() {
   if (!batch) return null
 
   const filtered = tab === 'all' ? lines : lines.filter(l => {
-    const w = { 'direct':'Direct Employee','hourly':'Contracted Hourly Worker','sub':'Subcontractor','office':'Office Staff' }[tab]
+    const w = { 'direct':'Permanent Staff','hourly':'Contract Worker','sub':'Subcontractor','office':'Office Staff' }[tab]
     return l.category === w
   })
 

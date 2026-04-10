@@ -19,7 +19,7 @@ export default function OffersPage() {
   const [formErrors, setFormErrors] = useState([])
   const [viewerHtml, setViewerHtml] = useState(null)
   const [viewerRef, setViewerRef] = useState('')
-  const [form, setForm] = useState({ first_name:'', last_name:'', passport_number:'', nationality:'', email:'', trade_role:'', category:'Direct Employee', employment_type:'Open-ended', pay_type:'monthly', basic_salary_or_rate:'', housing_allowance:'', transport_allowance:'', food_allowance:'', other_allowance:'', start_date:'', valid_until:'', notes:'' })
+  const [form, setForm] = useState({ first_name:'', last_name:'', passport_number:'', nationality:'', email:'', trade_role:'', category:'Permanent Staff', employment_type:'Open-ended', pay_type:'monthly', basic_salary_or_rate:'', housing_allowance:'', transport_allowance:'', food_allowance:'', other_allowance:'', start_date:'', valid_until:'', notes:'' })
 
   useEffect(() => { setOffers(getOffers()) }, [])
 
@@ -141,7 +141,7 @@ export default function OffersPage() {
               <div className="form-field"><label className="form-label">Nationality *</label><select className="form-select" value={form.nationality} onChange={e => setForm({...form, nationality:e.target.value})}><option value="">Select nationality</option>{NATIONALITIES.map(n => <option key={n} value={n}>{n}</option>)}</select></div>
               <div className="form-field"><label className="form-label">Email</label><input className="form-input" value={form.email} onChange={e => setForm({...form, email:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Position / Trade *</label><select className="form-select" value={form.trade_role} onChange={e => setForm({...form, trade_role:e.target.value})}><option value="">Select position</option>{POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}</select></div>
-              <div className="form-field"><label className="form-label">Category</label><select className="form-select" value={form.category} onChange={e => setForm({...form, category:e.target.value})}>{['Direct Employee','Contracted Hourly Worker','Subcontractor','Office Staff'].map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+              <div className="form-field"><label className="form-label">Category</label><select className="form-select" value={form.category} onChange={e => setForm({...form, category:e.target.value})}>{['Permanent Staff','Contract Worker','Subcontract Worker','Office Staff'].map(c => <option key={c} value={c}>{c}</option>)}</select></div>
               <div className="form-field"><label className="form-label">Employment type</label><select className="form-select" value={form.employment_type} onChange={e => setForm({...form, employment_type:e.target.value})}><option value="Open-ended">Open-ended</option><option value="Fixed-term">Fixed-term</option></select></div>
               <div className="form-field"><label className="form-label">Pay type</label><select className="form-select" value={form.pay_type} onChange={e => setForm({...form, pay_type:e.target.value})}><option value="monthly">Monthly salary</option><option value="hourly">Hourly rate</option></select></div>
               <div className="form-field"><label className="form-label">{form.pay_type === 'monthly' ? 'Basic salary (AED) *' : 'Hourly rate (AED) *'}</label><input className="form-input" type="number" value={form.basic_salary_or_rate} onChange={e => setForm({...form, basic_salary_or_rate:e.target.value})} /></div>

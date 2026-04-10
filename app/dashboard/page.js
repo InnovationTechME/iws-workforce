@@ -59,8 +59,8 @@ export default function DashboardPage() {
           <div style={{fontSize:48,fontWeight:800,lineHeight:1}}>{metrics.activeWorkers || 0}</div>
           <div style={{fontSize:12,opacity:0.8,marginTop:6}}>Active workers on record</div>
           <div style={{display:'flex',gap:16,marginTop:12,fontSize:11}}>
-            <span style={{opacity:0.9}}>Direct: {metrics.byCategory?.['Direct Employee']||0}</span>
-            <span style={{opacity:0.9}}>Hourly: {metrics.byCategory?.['Contracted Hourly Worker']||0}</span>
+            <span style={{opacity:0.9}}>Direct: {metrics.byCategory?.['Permanent Staff']||0}</span>
+            <span style={{opacity:0.9}}>Hourly: {metrics.byCategory?.['Contract Worker']||0}</span>
             <span style={{opacity:0.9}}>Sub: {metrics.byCategory?.['Subcontractor']||0}</span>
             <span style={{opacity:0.9}}>Office: {metrics.byCategory?.['Office Staff']||0}</span>
           </div>

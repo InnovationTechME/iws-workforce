@@ -14,7 +14,7 @@ export default function WorkersPage() {
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [showDrawer, setShowDrawer] = useState(false)
-  const [form, setForm] = useState({ full_name:'', trade_role:'', category:'Direct Employee', nationality:'', passport_number:'', mobile_number:'', email:'', payroll_type:'monthly', monthly_salary:'', hourly_rate:'', fixed_allowance:'', project_site:'', visa_company:'Innovation Technologies', subcontractor_company:'', subcontractor_billing_rate:'', subcontractor_cost_rate:'' })
+  const [form, setForm] = useState({ full_name:'', trade_role:'', category:'Permanent Staff', nationality:'', passport_number:'', mobile_number:'', email:'', payroll_type:'monthly', monthly_salary:'', hourly_rate:'', fixed_allowance:'', project_site:'', visa_company:'Innovation Technologies', subcontractor_company:'', subcontractor_billing_rate:'', subcontractor_cost_rate:'' })
 
   useEffect(() => { setWorkers(getWorkers()) }, [])
 
@@ -32,10 +32,10 @@ export default function WorkersPage() {
     addWorkerWithC3Task(worker)
     setWorkers(getWorkers())
     setShowDrawer(false)
-    setForm({ full_name:'', trade_role:'', category:'Direct Employee', nationality:'', passport_number:'', mobile_number:'', email:'', payroll_type:'monthly', monthly_salary:'', hourly_rate:'', fixed_allowance:'', project_site:'', visa_company:'Innovation Technologies', subcontractor_company:'', subcontractor_billing_rate:'', subcontractor_cost_rate:'' })
+    setForm({ full_name:'', trade_role:'', category:'Permanent Staff', nationality:'', passport_number:'', mobile_number:'', email:'', payroll_type:'monthly', monthly_salary:'', hourly_rate:'', fixed_allowance:'', project_site:'', visa_company:'Innovation Technologies', subcontractor_company:'', subcontractor_billing_rate:'', subcontractor_cost_rate:'' })
   }
 
-  const categories = ['Direct Employee', 'Contracted Hourly Worker', 'Subcontractor', 'Office Staff']
+  const categories = ['Permanent Staff', 'Contract Worker', 'Subcontract Worker', 'Office Staff']
   const statuses = ['Active', 'On Leave', 'Pre-employment', 'Inactive']
 
   return (
@@ -44,8 +44,8 @@ export default function WorkersPage() {
         actions={<button className="btn btn-primary" onClick={() => setShowDrawer(true)}>+ Add Worker</button>} />
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(5,minmax(0,1fr))',gap:10,marginBottom:4}}>
-        {[['All',workers.length],['Direct Employee',workers.filter(w=>w.category==='Direct Employee').length],['Contracted Hourly',workers.filter(w=>w.category==='Contracted Hourly Worker').length],['Subcontractor',workers.filter(w=>w.category==='Subcontractor').length],['Office Staff',workers.filter(w=>w.category==='Office Staff').length]].map(([label,count]) => (
-          <div key={label} className="stat-card" style={{cursor:'pointer'}} onClick={() => setCategoryFilter(label === 'All' ? 'all' : label === 'Contracted Hourly' ? 'Contracted Hourly Worker' : label)}>
+        {[['All',workers.length],['Permanent Staff',workers.filter(w=>w.category==='Permanent Staff').length],['Contract',workers.filter(w=>w.category==='Contract Worker').length],['Subcontract Worker',workers.filter(w=>w.category==='Subcontract Worker').length],['Office Staff',workers.filter(w=>w.category==='Office Staff').length]].map(([label,count]) => (
+          <div key={label} className="stat-card" style={{cursor:'pointer'}} onClick={() => setCategoryFilter(label === 'All' ? 'all' : label === 'Contract' ? 'Contract Worker' : label)}>
             <div className="num" style={{fontSize:20}}>{count}</div>
             <div className="lbl">{label}</div>
           </div>
@@ -74,12 +74,12 @@ export default function WorkersPage() {
                     <td><div style={{display:'flex',alignItems:'center',gap:8}}><div style={{width:32,height:32,borderRadius:'50%',background:'var(--teal-bg)',border:'1px solid var(--teal-border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:600,color:'var(--teal)',flexShrink:0}}>{w.full_name.split(' ').map(n=>n[0]).join('').slice(0,2)}</div><div><div style={{fontWeight:500}}>{w.full_name}</div><div style={{fontSize:11,color:'var(--hint)'}}>{w.worker_number}</div></div></div></td>
                     <td>{w.trade_role}</td>
                     <td>
-                      <StatusBadge label={w.category} tone={w.category === 'Subcontractor' ? 'neutral' : w.category === 'Office Staff' ? 'info' : 'neutral'} />
-                      {w.category === 'Subcontractor' && w.subcontractor_company && <div style={{fontSize:11,color:'var(--hint)',marginTop:2}}>{w.subcontractor_company}</div>}
+                      <StatusBadge label={w.category} tone={w.category === 'Subcontract Worker' ? 'neutral' : w.category === 'Office Staff' ? 'info' : 'neutral'} />
+                      {w.category === 'Subcontract Worker' && w.subcontractor_company && <div style={{fontSize:11,color:'var(--hint)',marginTop:2}}>{w.subcontractor_company}</div>}
                     </td>
                     <td>
                       <div style={{fontSize:12}}>{w.payroll_type === 'monthly' ? formatCurrency(w.monthly_salary) + '/mo' : formatCurrency(w.hourly_rate) + '/hr'}</div>
-                      {w.category === 'Subcontractor' && w.subcontractor_billing_rate && <div style={{fontSize:11,color:'var(--hint)'}}>Bill: {formatCurrency(w.subcontractor_billing_rate)}/hr</div>}
+                      {w.category === 'Subcontract Worker' && w.subcontractor_billing_rate && <div style={{fontSize:11,color:'var(--hint)'}}>Bill: {formatCurrency(w.subcontractor_billing_rate)}/hr</div>}
                     </td>
                     <td style={{fontSize:12,color:'var(--muted)'}}>{w.project_site}</td>
                     <td><StatusBadge label={w.status} tone={getStatusTone(w.status)} /></td>
@@ -110,7 +110,7 @@ export default function WorkersPage() {
               <div className="form-field"><label className="form-label">Fixed allowance (AED)</label><input className="form-input" type="number" value={form.fixed_allowance} onChange={e => setForm({...form, fixed_allowance:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Visa company</label><input className="form-input" value={form.visa_company} onChange={e => setForm({...form, visa_company:e.target.value})} /></div>
             </div>
-            {form.category === 'Subcontractor' && (
+            {form.category === 'Subcontract Worker' && (
               <div style={{padding:'12px',background:'var(--surface)',borderRadius:8,border:'0.5px solid var(--border)'}}>
                 <div style={{fontSize:12,fontWeight:500,marginBottom:10,color:'var(--muted)'}}>Subcontractor details</div>
                 <div className="form-grid">
