@@ -6,7 +6,7 @@ import AppShell from '../../../components/AppShell'
 import PageHeader from '../../../components/PageHeader'
 import StatusBadge from '../../../components/StatusBadge'
 import LetterViewer from '../../../components/LetterViewer'
-import { getWorker, getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS, calculateLeaveBalance } from '../../../lib/mockStore'
+import { getWorker, getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS, calculateLeaveBalance, getILOEStatus } from '../../../lib/mockStore'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
 import { offerLetterHTML, warningLetterHTML, experienceLetterHTML, terminationWithNoticeHTML, terminationWithoutNoticeHTML, resignationAcceptanceHTML, TERMINATION_GROUNDS_LIST } from '../../../lib/letterTemplates'
 
@@ -128,6 +128,24 @@ export default function WorkerDetailPage() {
                   <div style={{background:'var(--surface)',borderRadius:6,padding:'10px 12px',border:'1px solid var(--border)'}}><div style={{fontSize:11,color:'var(--muted)'}}>Accrual Rate</div><div style={{fontSize:18,fontWeight:700}}>{lb.accrual_rate}</div><div style={{fontSize:10,color:'var(--hint)'}}>days/month · {lb.months_of_service}mo service</div></div>
                 </div>
                 <div style={{marginTop:8,fontSize:11,color:'var(--hint)'}}>UAE Labour Law: 30 calendar days annual leave per year after 1 year service. Accrues at 2.5 days/month.</div>
+              </div>
+            )})()}
+            {/* ILOE Insurance */}
+            {(() => { const iloe = getILOEStatus(worker.id); if (!iloe) return null; return (
+              <div style={{marginTop:16,background:'var(--surface)',borderRadius:8,padding:'14px 16px',border:'0.5px solid var(--border)'}}>
+                <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',marginBottom:10,textTransform:'uppercase',letterSpacing:'0.5px'}}>Workers Compensation Insurance (ILOE)</div>
+                <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:12}}>
+                  <StatusBadge label={iloe.label} tone={iloe.tone} />
+                  {iloe.status === 'active' && <span style={{fontSize:12,color:'var(--muted)'}}>Expires: {formatDate(iloe.expiry)}</span>}
+                </div>
+                {iloe.status !== 'not_required' && (
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
+                    <div><div style={{fontSize:11,color:'var(--hint)'}}>Provider</div><div style={{fontSize:13,fontWeight:500}}>{iloe.provider||'—'}</div></div>
+                    <div><div style={{fontSize:11,color:'var(--hint)'}}>Annual cost</div><div style={{fontSize:13,fontWeight:500}}>AED {iloe.annual_cost||0}</div></div>
+                    <div><div style={{fontSize:11,color:'var(--hint)'}}>Monthly deduction</div><div style={{fontSize:13,fontWeight:600,color:'var(--danger)'}}>AED {iloe.monthly_deduction||0}</div></div>
+                  </div>
+                )}
+                {iloe.status === 'not_required' && <div style={{fontSize:12,color:'var(--hint)'}}>Subcontract workers — ILOE managed by their company.</div>}
               </div>
             )})()}
           </div>
