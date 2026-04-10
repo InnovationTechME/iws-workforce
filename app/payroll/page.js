@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
-import { getAllPayrollBatches, getPayrollBatchByMonth, getPayrollLinesByBatch, canEditPayrollBatch, unlockPayrollBatch, addCorrectionNote, getPayrollBatch, getPayrollLines, updatePayrollBatch, addPayrollAdjustment, getPenaltyDeductions, confirmPenaltyDeduction, removePenaltyDeduction, getRamadanMode, getWorkers } from '../../lib/mockStore'
+import { getAllPayrollBatches, getPayrollBatchByMonth, getPayrollLinesByBatch, canEditPayrollBatch, unlockPayrollBatch, addCorrectionNote, getPayrollBatch, getPayrollLines, updatePayrollBatch, addPayrollAdjustment, getPenaltyDeductions, confirmPenaltyDeduction, removePenaltyDeduction, getRamadanMode, getWorkers, getTimesheetHeaders, getTimesheetLines, isPublicHoliday, getPublicHolidays } from '../../lib/mockStore'
 import { formatCurrency, getStatusTone } from '../../lib/utils'
 import { canAccess, getRole } from '../../lib/mockAuth'
 
@@ -24,6 +24,8 @@ export default function PayrollPage() {
   const [showCorrection, setShowCorrection] = useState(false)
   const [correctionNote, setCorrectionNote] = useState('')
   const [timesheetPayroll, setTimesheetPayroll] = useState(null)
+  const [selectedTsHeader, setSelectedTsHeader] = useState(null)
+  const [tsHeaders, setTsHeaders] = useState([])
 
   useEffect(() => {
     // Check for pending timesheet data from upload page
@@ -46,6 +48,9 @@ export default function PayrollPage() {
     }
     setPenalties(getPenaltyDeductions())
     setOfficeStaff(getWorkers().filter(w => w.category === 'Office Staff' && w.active !== false))
+    const hdrs = getTimesheetHeaders()
+    setTsHeaders(hdrs)
+    if (hdrs.length > 0) setSelectedTsHeader(hdrs[0].id)
   }, [])
 
   const loadBatch = (month) => {
@@ -220,10 +225,11 @@ export default function PayrollPage() {
       <div style={{display:'grid',gridTemplateColumns:'1fr 340px',gap:16}}>
         <div className="panel">
           <div className="tabs">
-            {[['all','All'],['direct','Direct'],['hourly','Hourly'],['sub','Sub'],['office','Office']].map(([key,label]) => (
+            {[['all','All'],['direct','Direct'],['hourly','Hourly'],['sub','Sub'],['office','Office'],['timesheet_review','📋 Timesheet Review']].map(([key,label]) => (
               <button key={key} className={`tab${tab===key?' active':''}`} onClick={() => setTab(key)}>{label}</button>
             ))}
           </div>
+          {tab !== 'timesheet_review' ? (
           <div className="table-wrap"><table>
             <thead><tr><th>Worker</th><th>Type</th><th>Payment</th><th>Normal pay</th><th>OT pay</th><th>Allowances</th><th>Deductions</th><th>Net pay</th><th>C3</th></tr></thead>
             <tbody>
@@ -242,6 +248,160 @@ export default function PayrollPage() {
               ))}
             </tbody>
           </table></div>
+          ) : (() => {
+            // TIMESHEET REVIEW TAB
+            const allWorkers = getWorkers()
+            const ramadan = getRamadanMode()
+            const selHeader = tsHeaders.find(h => h.id === selectedTsHeader)
+            const tsLines = selHeader ? getTimesheetLines(selHeader.id) : []
+            // Group lines by worker
+            const byWorker = {}
+            tsLines.forEach(l => {
+              if (!byWorker[l.worker_id]) byWorker[l.worker_id] = { worker_id:l.worker_id, worker_name:l.worker_name, worker_number:l.worker_number, trade_role:l.trade_role, days:{} }
+              const day = l.work_date ? parseInt(l.work_date.split('-')[2]) : 0
+              if (day > 0) byWorker[l.worker_id].days[day] = (byWorker[l.worker_id].days[day]||0) + l.total_hours
+            })
+            const workerRows = Object.values(byWorker)
+            // Figure out how many days this month has
+            let daysInMonth = 31
+            if (selHeader?.date) { const [y,m] = selHeader.date.split('-').map(Number); daysInMonth = new Date(y, m, 0).getDate() }
+            const dayNums = Array.from({length:daysInMonth},(_,i)=>i+1)
+            // Calculate per-worker totals
+            const calcRows = workerRows.map(wr => {
+              const worker = allWorkers.find(w => w.id === wr.worker_id)
+              const isFlat = worker && (worker.category === 'Contract Worker' || worker.category === 'Subcontract Worker')
+              const baseRate = worker ? (isFlat ? (worker.hourly_rate||0) : (worker.monthly_salary||0)/30/8) : 0
+              const otThreshold = ramadan?.active ? 6 : 8
+              let totalHrs=0, normalHrs=0, otHrs=0, holidayHrs=0
+              const monthStr = selHeader?.date?.slice(0,7) || '2026-04'
+              dayNums.forEach(d => {
+                const hrs = wr.days[d] || 0
+                if (hrs <= 0) return
+                totalHrs += hrs
+                const dateStr = monthStr + '-' + String(d).padStart(2,'0')
+                const isFriday = new Date(dateStr).getDay() === 5
+                const isHol = isPublicHoliday(dateStr) || isFriday
+                if (isHol) { holidayHrs += hrs }
+                else { normalHrs += Math.min(hrs, otThreshold); otHrs += Math.max(0, hrs - otThreshold) }
+              })
+              const otPay = isFlat ? 0 : Math.round(otHrs * baseRate * 1.25 * 100)/100
+              const holPay = Math.round(holidayHrs * baseRate * 1.5 * 100)/100
+              const totalEarnings = isFlat ? Math.round(totalHrs * baseRate * 100)/100 : (worker?.monthly_salary||0) + otPay + holPay
+              return { ...wr, worker, isFlat, baseRate:Math.round(baseRate*100)/100, totalHrs:Math.round(totalHrs*100)/100, normalHrs:Math.round(normalHrs*100)/100, otHrs:Math.round(otHrs*100)/100, holidayHrs:Math.round(holidayHrs*100)/100, otPay, holPay, totalEarnings:Math.round(totalEarnings*100)/100 }
+            })
+            const grandTotalHrs = calcRows.reduce((s,r)=>s+r.totalHrs,0)
+            const grandOtHrs = calcRows.reduce((s,r)=>s+r.otHrs,0)
+            const grandEarnings = calcRows.reduce((s,r)=>s+r.totalEarnings,0)
+            // Reconciliation against payroll lines
+            const reconRows = calcRows.map(cr => {
+              const pl = lines.find(l => l.worker_id === cr.worker_id)
+              const plNet = pl ? pl.net_pay : null
+              const diff = plNet !== null ? Math.round((cr.totalEarnings - plNet)*100)/100 : null
+              return { ...cr, payroll_net: plNet, diff, status: plNet === null ? 'missing_payroll' : Math.abs(diff) < 1 ? 'match' : 'mismatch' }
+            })
+            // Workers in payroll but not in timesheet
+            const tsWorkerIds = new Set(calcRows.map(r=>r.worker_id))
+            const missingTs = lines.filter(l => !tsWorkerIds.has(l.worker_id))
+            const mismatchCount = reconRows.filter(r=>r.status==='mismatch').length + reconRows.filter(r=>r.status==='missing_payroll').length + missingTs.length
+
+            return (<div>
+              {/* Header selector */}
+              <div style={{marginBottom:16,display:'flex',gap:12,alignItems:'center'}}>
+                <label style={{fontSize:12,fontWeight:600,color:'var(--muted)'}}>Timesheet:</label>
+                <select className="filter-select" value={selectedTsHeader||''} onChange={e => setSelectedTsHeader(e.target.value)}>
+                  {tsHeaders.map(h => <option key={h.id} value={h.id}>{h.client_name} · {h.job_no} · {h.date?.slice(0,10)}</option>)}
+                </select>
+              </div>
+
+              {/* Summary strip */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:16}}>
+                <div className="stat-card"><div className="num" style={{fontSize:18}}>{calcRows.length}</div><div className="lbl">Workers</div></div>
+                <div className="stat-card"><div className="num" style={{fontSize:18}}>{Math.round(grandTotalHrs)}</div><div className="lbl">Total hours</div></div>
+                <div className="stat-card"><div className={`num ${grandOtHrs>0?'warning':''}`} style={{fontSize:18}}>{Math.round(grandOtHrs)}</div><div className="lbl">OT hours</div></div>
+                <div className="stat-card"><div className="num teal" style={{fontSize:18}}>{formatCurrency(grandEarnings)}</div><div className="lbl">Total earnings</div></div>
+              </div>
+
+              {/* Consolidated hours table */}
+              {!selHeader ? <div style={{color:'var(--hint)',padding:24,textAlign:'center'}}>Select a timesheet above</div> : (
+              <div style={{overflowX:'auto',marginBottom:20}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                  <thead><tr style={{background:'var(--surface)'}}>
+                    <th style={{padding:'6px 8px',textAlign:'left',position:'sticky',left:0,background:'var(--surface)',zIndex:2,minWidth:140,borderRight:'2px solid var(--border)',fontSize:10,fontWeight:600}}>WORKER</th>
+                    {dayNums.map(d => <th key={d} style={{padding:'4px 2px',textAlign:'center',minWidth:36,fontSize:10,fontWeight:500,color:'var(--muted)'}}>{d}</th>)}
+                    <th style={{padding:'6px 4px',textAlign:'center',borderLeft:'2px solid var(--border)',fontSize:10,fontWeight:700,background:'#eff6ff',minWidth:50}}>TOTAL</th>
+                    <th style={{padding:'6px 4px',textAlign:'center',fontSize:10,minWidth:44}}>NORM</th>
+                    <th style={{padding:'6px 4px',textAlign:'center',fontSize:10,minWidth:36}}>OT</th>
+                    <th style={{padding:'6px 4px',textAlign:'center',fontSize:10,minWidth:36}}>HOL</th>
+                    <th style={{padding:'6px 4px',textAlign:'center',fontSize:10,minWidth:55}}>RATE</th>
+                    <th style={{padding:'6px 4px',textAlign:'center',fontSize:10,minWidth:60}}>OT PAY</th>
+                    <th style={{padding:'6px 4px',textAlign:'center',fontSize:10,minWidth:60}}>HOL PAY</th>
+                    <th style={{padding:'6px 4px',textAlign:'center',fontSize:10,fontWeight:700,minWidth:75,background:'#eff6ff'}}>EARNINGS</th>
+                  </tr></thead>
+                  <tbody>
+                    {calcRows.map((cr,ri) => {
+                      const monthStr = selHeader?.date?.slice(0,7) || '2026-04'
+                      return (
+                      <tr key={ri} style={{borderBottom:'1px solid #f1f5f9'}}>
+                        <td style={{padding:'6px 8px',position:'sticky',left:0,background:ri%2===0?'#fff':'#fafbfc',zIndex:1,borderRight:'2px solid var(--border)'}}>
+                          <div style={{fontWeight:500,fontSize:11}}>{cr.worker_name}</div>
+                          <div style={{fontSize:9,color:'var(--hint)'}}>{cr.worker_number}</div>
+                        </td>
+                        {dayNums.map(d => {
+                          const hrs = cr.days[d] || 0
+                          const dateStr = monthStr+'-'+String(d).padStart(2,'0')
+                          const isFri = new Date(dateStr).getDay() === 5
+                          const isHol = isPublicHoliday(dateStr) || isFri
+                          const bg = hrs <= 0 ? '#f8fafc' : isHol ? '#fef2f2' : hrs > 8 ? '#fffbeb' : '#f0fdf4'
+                          const color = hrs <= 0 ? 'var(--hint)' : isHol ? '#dc2626' : hrs > 8 ? '#92400e' : '#166534'
+                          return <td key={d} style={{padding:'3px 1px',textAlign:'center',background:bg,fontSize:11,fontWeight:hrs>0?600:400,color,fontFamily:'monospace'}}>{hrs>0?hrs:'—'}</td>
+                        })}
+                        <td style={{padding:'6px 4px',textAlign:'center',borderLeft:'2px solid var(--border)',fontWeight:700,fontSize:12,background:'#eff6ff',color:'var(--teal)'}}>{cr.totalHrs}</td>
+                        <td style={{padding:'4px',textAlign:'center',fontSize:11}}>{cr.normalHrs}</td>
+                        <td style={{padding:'4px',textAlign:'center',fontSize:11,color:cr.otHrs>0?'var(--warning)':'var(--hint)',fontWeight:cr.otHrs>0?600:400}}>{cr.otHrs}</td>
+                        <td style={{padding:'4px',textAlign:'center',fontSize:11,color:cr.holidayHrs>0?'var(--danger)':'var(--hint)',fontWeight:cr.holidayHrs>0?600:400}}>{cr.holidayHrs}</td>
+                        <td style={{padding:'4px',textAlign:'center',fontSize:10,color:'var(--muted)'}}>{cr.baseRate}</td>
+                        <td style={{padding:'4px',textAlign:'center',fontSize:11,color:'var(--success)'}}>{cr.otPay>0?cr.otPay:'—'}</td>
+                        <td style={{padding:'4px',textAlign:'center',fontSize:11,color:'var(--danger)'}}>{cr.holPay>0?cr.holPay:'—'}</td>
+                        <td style={{padding:'6px 4px',textAlign:'center',fontWeight:700,fontSize:12,background:'#eff6ff',color:'var(--teal)'}}>{formatCurrency(cr.totalEarnings)}</td>
+                      </tr>)
+                    })}
+                  </tbody>
+                </table>
+              </div>)}
+
+              {/* Reconciliation */}
+              {calcRows.length > 0 && (
+              <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,padding:16}}>
+                <div style={{fontSize:12,fontWeight:700,marginBottom:10}}>Reconciliation: Timesheet vs Payroll</div>
+                <div className="table-wrap"><table>
+                  <thead><tr><th>Worker</th><th>Timesheet Total</th><th>Payroll Net</th><th>Difference</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {reconRows.map((r,i) => (
+                      <tr key={i} style={{background:r.status==='mismatch'?'#fef2f2':r.status==='missing_payroll'?'#fef2f2':''}}>
+                        <td style={{fontWeight:500,fontSize:12}}>{r.worker_name}<div style={{fontSize:10,color:'var(--hint)'}}>{r.worker_number}</div></td>
+                        <td style={{fontSize:12}}>{formatCurrency(r.totalEarnings)}</td>
+                        <td style={{fontSize:12}}>{r.payroll_net !== null ? formatCurrency(r.payroll_net) : <span style={{color:'var(--danger)',fontWeight:600}}>Missing from payroll</span>}</td>
+                        <td style={{fontSize:12,fontWeight:600,color:r.diff && Math.abs(r.diff)>=1?'var(--danger)':'var(--success)'}}>{r.diff !== null ? (r.diff >= 0 ? '+' : '') + formatCurrency(r.diff) : '—'}</td>
+                        <td>{r.status === 'match' ? <StatusBadge label="✓ Match" tone="success" /> : r.status === 'missing_payroll' ? <StatusBadge label="Missing from payroll" tone="danger" /> : <StatusBadge label="⚠ Mismatch" tone="danger" />}</td>
+                      </tr>
+                    ))}
+                    {missingTs.map((l,i) => (
+                      <tr key={'mt-'+i} style={{background:'#fffbeb'}}>
+                        <td style={{fontWeight:500,fontSize:12}}>{l.worker_name}<div style={{fontSize:10,color:'var(--hint)'}}>{l.worker_number}</div></td>
+                        <td style={{fontSize:12,color:'var(--warning)'}}><em>No timesheet found</em></td>
+                        <td style={{fontSize:12}}>{formatCurrency(l.net_pay)}</td>
+                        <td>—</td>
+                        <td><StatusBadge label="No timesheet" tone="warning" /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table></div>
+                <div style={{marginTop:10,fontSize:12,color:mismatchCount>0?'var(--danger)':'var(--success)',fontWeight:600}}>
+                  {mismatchCount === 0 ? '✓ All workers reconciled — no mismatches' : `⚠ ${mismatchCount} issue${mismatchCount>1?'s':''} found — review before approving payroll`}
+                </div>
+              </div>)}
+            </div>)
+          })()}
         </div>
 
         {selected && (
