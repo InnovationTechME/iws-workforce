@@ -51,7 +51,7 @@ export default function WarningsPage() {
   return (
     <>
     <AppShell pageTitle="Warnings">
-      <PageHeader eyebrow="Warnings" title="Warnings and memos register" description="Track disciplinary records, memos, and follow-up status."
+      <PageHeader eyebrow="Disciplinary Records" title="Disciplinary records" description="Track warnings, memos, penalties, and disciplinary actions."
         actions={<button className="btn btn-primary" onClick={() => setShowDrawer(true)}>+ Create Record</button>} />
 
       <div className="summary-strip">
@@ -71,7 +71,7 @@ export default function WarningsPage() {
                 <thead><tr><th>Worker</th><th>Type</th><th>Date</th><th>Status</th><th>Reason</th></tr></thead>
                 <tbody>
                   {filtered.map(w => (
-                    <tr key={w.id} style={{cursor:'pointer',background:selected?.id===w.id?'#f0fdfa':''}} onClick={() => setSelected(w)}>
+                    <tr key={w.id} style={{cursor:'pointer',background:selected?.id===w.id?'#eff6ff':''}} onClick={() => setSelected(w)}>
                       <td style={{fontWeight:500}}>{w.worker_name}<div style={{fontSize:11,color:'var(--hint)'}}>{w.worker_number}</div></td>
                       <td><StatusBadge label={w.warning_type} tone={w.warning_type==='warning'?'danger':'neutral'} /></td>
                       <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(w.issue_date)}</td>

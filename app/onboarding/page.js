@@ -85,7 +85,7 @@ export default function OnboardingPage() {
                   {records.map(r => {
                     const w = workers.find(wk => wk.id === r.worker_id)
                     return (
-                      <tr key={r.id} style={{cursor:'pointer',background:selected?.id===r.id?'#f0fdfa':''}} onClick={() => selectRecord(r)}>
+                      <tr key={r.id} style={{cursor:'pointer',background:selected?.id===r.id?'#eff6ff':''}} onClick={() => selectRecord(r)}>
                         <td style={{fontWeight:500}}>{w?.full_name || r.worker_id}<div style={{fontSize:11,color:'var(--hint)'}}>{w?.trade_role}</div></td>
                         <td><StatusBadge label={r.onboarding_status} tone={r.onboarding_status?.includes('Failed')?'danger':r.onboarding_status==='Converted to Employee'?'success':'info'} /></td>
                         <td><StatusBadge label={r.medical_result} tone={r.medical_result==='passed'?'success':r.medical_result==='failed'?'danger':'neutral'} /></td>

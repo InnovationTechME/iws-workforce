@@ -54,7 +54,7 @@ export default function DashboardPage() {
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',gap:12,marginBottom:20}}>
-        <div style={{background:'linear-gradient(135deg,#0d9488,#0891b2)',borderRadius:12,padding:'20px 24px',color:'white',cursor:'pointer'}} onClick={()=>router.push('/workers')}>
+        <div style={{background:'linear-gradient(135deg,#1d4ed8,#2563eb)',borderRadius:12,padding:'20px 24px',color:'white',cursor:'pointer'}} onClick={()=>router.push('/workers')}>
           <div style={{fontSize:11,fontWeight:600,opacity:0.8,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:4}}>Today&apos;s Total Workforce</div>
           <div style={{fontSize:48,fontWeight:800,lineHeight:1}}>{metrics.activeWorkers || 0}</div>
           <div style={{fontSize:12,opacity:0.8,marginTop:6}}>Active workers on record</div>

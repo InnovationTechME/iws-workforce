@@ -80,7 +80,7 @@ export default function PacksPage() {
 
   return (
     <AppShell pageTitle="Packs">
-      <PageHeader eyebrow="Packs" title="Pack builder" description="Select documents for each worker and download as a ZIP pack for client submission." />
+      <PageHeader eyebrow="Document Packs" title="Document pack builder" description="Select documents for each worker and download as a ZIP pack for client submission." />
       <div className="summary-strip">
         <div className="stat-card"><div className="num success" style={{fontSize:20}}>{ready}</div><div className="lbl">Pack ready</div></div>
         <div className="stat-card"><div className="num danger" style={{fontSize:20}}>{blocked}</div><div className="lbl">Blocked</div></div>
@@ -99,7 +99,7 @@ export default function PacksPage() {
             <thead><tr><th>Worker</th><th>Category</th><th>Status</th><th>Coverage</th><th>Missing</th><th>Build Pack</th></tr></thead>
             <tbody>
               {filtered.map(p=>(
-                <tr key={p.worker_id} style={{background:selectedWorker?.id===p.worker_id?'#f0fdfa':''}}>
+                <tr key={p.worker_id} style={{background:selectedWorker?.id===p.worker_id?'#eff6ff':''}}>
                   <td style={{fontWeight:500}}>{p.worker_name}<div style={{fontSize:11,color:'var(--hint)'}}>{p.worker_number}</div></td>
                   <td><StatusBadge label={p.category} tone="neutral" /></td>
                   <td><StatusBadge label={p.available_count===p.required_count?'Ready':'Blocked'} tone={p.available_count===p.required_count?'success':'danger'} /></td>
@@ -120,7 +120,7 @@ export default function PacksPage() {
             </div>
             <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',marginBottom:8}}>SELECT DOCUMENTS TO INCLUDE</div>
 
-            <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 0',borderBottom:'1px solid var(--border)',background:'#f0fdfa',borderRadius:6,paddingLeft:8,marginBottom:4}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 0',borderBottom:'1px solid var(--border)',background:'#eff6ff',borderRadius:6,paddingLeft:8,marginBottom:4}}>
               <input type="checkbox" checked={true} disabled style={{accentColor:'var(--teal)'}} />
               <div style={{flex:1}}>
                 <div style={{fontSize:12,fontWeight:600,color:'var(--teal)'}}>📋 Worker Cover Page</div>

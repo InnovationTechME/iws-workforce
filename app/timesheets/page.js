@@ -76,7 +76,7 @@ export default function TimesheetsPage() {
                 <thead><tr><th>Date</th><th>Client / site</th><th>Status</th></tr></thead>
                 <tbody>
                   {headers.map(h => (
-                    <tr key={h.id} style={{cursor:'pointer',background:selected?.id===h.id?'#f0fdfa':''}} onClick={() => setSelected(h)}>
+                    <tr key={h.id} style={{cursor:'pointer',background:selected?.id===h.id?'#eff6ff':''}} onClick={() => setSelected(h)}>
                       <td style={{fontSize:12}}>{formatDate(h.date)}<div style={{fontSize:11,color:'var(--hint)'}}>{h.job_no}</div></td>
                       <td style={{fontWeight:500}}>{h.client_name}<div style={{fontSize:11,color:'var(--hint)'}}>{h.project_site}</div></td>
                       <td><StatusBadge label={h.final_approval_status} tone={toneMap[h.final_approval_status]||'neutral'} /></td>

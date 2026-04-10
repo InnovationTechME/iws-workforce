@@ -68,7 +68,7 @@ export default function OffboardingExitPage() {
 
   return (
     <AppShell pageTitle="Offboarding">
-      <PageHeader eyebrow="Offboarding & Exit" title="Worker offboarding"
+      <PageHeader eyebrow="Worker Exit" title="Worker exit &amp; offboarding"
         description="Complete all exit checklist items before a worker file can be closed. Prevents double-payment and ensures compliance."
         actions={<button className="btn btn-danger" onClick={() => setShowInitiate(true)}>+ Initiate Offboarding</button>} />
 
@@ -97,7 +97,7 @@ export default function OffboardingExitPage() {
                   const done = OFFBOARDING_ITEMS.filter(i=>i.required&&r.checklist[i.key]?.done).length
                   const pct = Math.round((done/total)*100)
                   return (
-                    <tr key={r.id} style={{cursor:'pointer',background:selected?.id===r.id?'#f0fdfa':''}} onClick={()=>setSelected(r)}>
+                    <tr key={r.id} style={{cursor:'pointer',background:selected?.id===r.id?'#eff6ff':''}} onClick={()=>setSelected(r)}>
                       <td style={{fontWeight:500}}>{r.worker_name}<div style={{fontSize:11,color:'var(--hint)'}}>{r.worker_number}</div></td>
                       <td style={{fontSize:12}}>{r.reason}</td>
                       <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(r.last_working_date)}</td>
@@ -159,7 +159,7 @@ export default function OffboardingExitPage() {
                       <div style={{fontSize:16,fontWeight:700,color:'var(--danger)'}}>-{formatCurrency(finalSettlement.summary.total_deductions)}</div>
                     </div>
                   )}
-                  <div style={{display:'flex',justifyContent:'space-between',padding:'12px 16px',background:'#f0fdfa',borderRadius:8,marginTop:8}}>
+                  <div style={{display:'flex',justifyContent:'space-between',padding:'12px 16px',background:'#eff6ff',borderRadius:8,marginTop:8}}>
                     <div style={{fontSize:15,fontWeight:800}}>NET FINAL SETTLEMENT</div>
                     <div style={{fontSize:22,fontWeight:800,color:'var(--teal)'}}>{formatCurrency(finalSettlement.summary.net_settlement)}</div>
                   </div>

@@ -100,7 +100,7 @@ export default function TimesheetReconcilePage() {
         <div className="panel">
           <div className="panel-header"><div><h2>Select timesheet</h2></div></div>
           {headers.map(h => (
-            <div key={h.id} style={{padding:'10px 12px',borderRadius:6,cursor:'pointer',marginBottom:4,background:selectedHeader?.id===h.id?'#f0fdfa':'transparent',border:selectedHeader?.id===h.id?'1px solid #99f6e4':'1px solid transparent'}} onClick={() => handleSelectHeader(h)}>
+            <div key={h.id} style={{padding:'10px 12px',borderRadius:6,cursor:'pointer',marginBottom:4,background:selectedHeader?.id===h.id?'#eff6ff':'transparent',border:selectedHeader?.id===h.id?'1px solid #bfdbfe':'1px solid transparent'}} onClick={() => handleSelectHeader(h)}>
               <div style={{fontSize:13,fontWeight:600}}>{h.client_name}</div>
               <div style={{fontSize:11,color:'var(--muted)'}}>{h.job_no} · {formatDate(h.date)}</div>
             </div>

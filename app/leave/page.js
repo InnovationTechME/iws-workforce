@@ -35,7 +35,7 @@ export default function LeavePage() {
 
   return (
     <AppShell pageTitle="Leave">
-      <PageHeader eyebrow="Leave" title="Leave register" description="Track and approve annual leave, sick leave, and unpaid leave."
+      <PageHeader eyebrow="Leave Requests" title="Leave requests" description="Track and approve annual leave, sick leave, emergency, and unpaid leave."
         actions={<button className="btn btn-primary" onClick={() => setShowDrawer(true)}>+ Add Leave</button>} />
 
       <div className="summary-strip">

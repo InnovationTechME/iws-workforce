@@ -8,9 +8,9 @@
   --text: #0f172a;
   --muted: #64748b;
   --hint: #94a3b8;
-  --teal: #0d9488;
-  --teal-bg: #f0fdfa;
-  --teal-border: #99f6e4;
+  --teal: #1d4ed8;
+  --teal-bg: #eff6ff;
+  --teal-border: #bfdbfe;
   --success: #16a34a;
   --success-bg: #f0fdf4;
   --success-border: #bbf7d0;
@@ -104,7 +104,7 @@ tr:hover td { background: #fafcff; }
 .btn-ghost { background: transparent; color: var(--muted); border: none; padding: 6px 10px; }
 .btn-ghost:hover { background: var(--surface); color: var(--text); }
 .btn-teal { background: var(--teal-bg); color: var(--teal); border: 0.5px solid var(--teal-border); }
-.btn-teal:hover { background: #ccfbf1; }
+.btn-teal:hover { background: #dbeafe; }
 .btn-danger { background: var(--danger-bg); color: var(--danger); border: 0.5px solid var(--danger-border); }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 

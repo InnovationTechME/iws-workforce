@@ -6,7 +6,7 @@ import AppShell from '../../../components/AppShell'
 import PageHeader from '../../../components/PageHeader'
 import StatusBadge from '../../../components/StatusBadge'
 import LetterViewer from '../../../components/LetterViewer'
-import { getWorker, getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS } from '../../../lib/mockStore'
+import { getWorker, getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS, calculateLeaveBalance } from '../../../lib/mockStore'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
 import { offerLetterHTML, warningLetterHTML, experienceLetterHTML, terminationWithNoticeHTML, terminationWithoutNoticeHTML, resignationAcceptanceHTML, TERMINATION_GROUNDS_LIST } from '../../../lib/letterTemplates'
 
@@ -117,6 +117,19 @@ export default function WorkerDetailPage() {
                 </div>
               )}
             </div>
+            {/* Leave Balance */}
+            {(() => { const lb = calculateLeaveBalance(worker.id); if (!lb) return null; return (
+              <div style={{marginTop:16,background:'var(--surface)',borderRadius:8,padding:'14px 16px',border:'0.5px solid var(--border)'}}>
+                <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',marginBottom:10,textTransform:'uppercase',letterSpacing:'0.5px'}}>Leave Balance</div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
+                  <div style={{background:'var(--teal-bg)',borderRadius:6,padding:'10px 12px',border:'1px solid var(--teal-border)'}}><div style={{fontSize:11,color:'var(--muted)'}}>Accrued</div><div style={{fontSize:22,fontWeight:700,color:'var(--teal)'}}>{lb.accrued}</div><div style={{fontSize:10,color:'var(--hint)'}}>days earned</div></div>
+                  <div style={{background:'var(--danger-bg)',borderRadius:6,padding:'10px 12px',border:'1px solid var(--danger-border)'}}><div style={{fontSize:11,color:'var(--muted)'}}>Used</div><div style={{fontSize:22,fontWeight:700,color:'var(--danger)'}}>{lb.used}</div><div style={{fontSize:10,color:'var(--hint)'}}>days taken</div></div>
+                  <div style={{background:'var(--success-bg)',borderRadius:6,padding:'10px 12px',border:'1px solid var(--success-border)'}}><div style={{fontSize:11,color:'var(--muted)'}}>Remaining</div><div style={{fontSize:22,fontWeight:700,color:'var(--success)'}}>{lb.remaining}</div><div style={{fontSize:10,color:'var(--hint)'}}>days available</div></div>
+                  <div style={{background:'var(--surface)',borderRadius:6,padding:'10px 12px',border:'1px solid var(--border)'}}><div style={{fontSize:11,color:'var(--muted)'}}>Accrual Rate</div><div style={{fontSize:18,fontWeight:700}}>{lb.accrual_rate}</div><div style={{fontSize:10,color:'var(--hint)'}}>days/month · {lb.months_of_service}mo service</div></div>
+                </div>
+                <div style={{marginTop:8,fontSize:11,color:'var(--hint)'}}>UAE Labour Law: 30 calendar days annual leave per year after 1 year service. Accrues at 2.5 days/month.</div>
+              </div>
+            )})()}
           </div>
         )}
 

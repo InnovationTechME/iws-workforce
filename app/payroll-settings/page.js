@@ -77,7 +77,7 @@ export default function PayrollSettingsPage() {
         <div className="panel">
           <div className="panel-header"><div><h2>📌 Manually Declared Holidays</h2><p>Additional days declared by management</p></div><button className="btn btn-primary btn-sm" onClick={() => setShowAddHoliday(true)}>+ Declare Holiday</button></div>
           {showAddHoliday && (
-            <div style={{background:'#f0fdfa',border:'1px solid #99f6e4',borderRadius:6,padding:12,marginBottom:12}}>
+            <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:6,padding:12,marginBottom:12}}>
               <div style={{display:'flex',gap:8,alignItems:'flex-end',flexWrap:'wrap'}}>
                 <div className="form-field" style={{margin:0}}><label className="form-label">Date</label><input className="form-input" type="date" value={hForm.date} onChange={e=>setHForm({...hForm,date:e.target.value})} /></div>
                 <div className="form-field" style={{flex:1,margin:0}}><label className="form-label">Holiday name</label><input className="form-input" value={hForm.name} placeholder="e.g. Company Foundation Day" onChange={e=>setHForm({...hForm,name:e.target.value})} /></div>

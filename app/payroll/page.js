@@ -180,7 +180,7 @@ export default function PayrollPage() {
             <thead><tr><th>Worker</th><th>Type</th><th>Payment</th><th>Normal pay</th><th>OT pay</th><th>Allowances</th><th>Deductions</th><th>Net pay</th><th>C3</th></tr></thead>
             <tbody>
               {filtered.map(l => (
-                <tr key={l.id} style={{cursor:'pointer',background:selected?.id===l.id?'#f0fdfa':''}} onClick={() => setSelected(l)}>
+                <tr key={l.id} style={{cursor:'pointer',background:selected?.id===l.id?'#eff6ff':''}} onClick={() => setSelected(l)}>
                   <td style={{fontWeight:500}}>{l.worker_name}<div style={{fontSize:11,color:'var(--hint)'}}>{l.worker_number}</div></td>
                   <td><StatusBadge label={l.payroll_type} tone="neutral" /></td>
                   <td><StatusBadge label={l.payment_method||'WPS'} tone={l.payment_method==='Non-WPS'?'warning':l.payment_method==='Cash'?'danger':'success'} /></td>
