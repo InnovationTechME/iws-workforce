@@ -26,6 +26,7 @@ export default function PayrollPage() {
   const [timesheetPayroll, setTimesheetPayroll] = useState(null)
   const [selectedTsHeader, setSelectedTsHeader] = useState(null)
   const [tsHeaders, setTsHeaders] = useState([])
+  const [showVerification, setShowVerification] = useState(false)
 
   useEffect(() => {
     // Check for pending timesheet data from upload page
@@ -449,6 +450,73 @@ export default function PayrollPage() {
       {!canEdit && batch.locked && (
         <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:8,padding:'12px 16px',marginTop:16,fontSize:12,color:'#92400e'}}>
           <strong>Note:</strong> This payroll is locked. To correct errors, add a correction note and adjust in the following month&apos;s payroll.
+        </div>
+      )}
+
+      {/* Payroll Verification Panel */}
+      {lines.length > 0 && (
+        <div className="panel" style={{marginTop:16}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <button className="btn btn-ghost" onClick={() => setShowVerification(!showVerification)} style={{fontSize:13,fontWeight:600}}>
+              🔍 {showVerification ? 'Hide' : 'Show'} Verification Breakdown
+            </button>
+            {showVerification && <div style={{fontSize:10,color:'var(--hint)',fontStyle:'italic'}}>Rule: salary ÷ 30 ÷ 8 = base rate. Weekday OT ×1.25, Holiday OT ×1.50</div>}
+          </div>
+          {showVerification && (() => {
+            const allW = getWorkers()
+            const verRows = lines.map(l => {
+              const worker = allW.find(w => w.id === l.worker_id)
+              const isFlat = worker && (worker.category === 'Contract Worker' || worker.category === 'Subcontract Worker')
+              const basic = worker?.monthly_salary || 0
+              const rate = isFlat ? (worker?.hourly_rate||0) : basic / 30 / 8
+              const otPay = isFlat ? 0 : Math.round((l.ot_hours||0) * rate * 1.25 * 100) / 100
+              const holPay = Math.round((l.holiday_hours||0) * rate * 1.50 * 100) / 100
+              const allowances = (l.allowances_total||0)
+              const deductions = (l.deductions_total||0) + (l.advances_total||0)
+              const expectedNet = Math.round((basic + allowances + otPay + holPay - deductions) * 100) / 100
+              const actualNet = l.net_pay || 0
+              const diff = Math.round((actualNet - expectedNet) * 100) / 100
+              const match = Math.abs(diff) < 1
+              return { l, worker, isFlat, basic, rate:Math.round(rate*100)/100, otPay, holPay, allowances, deductions, expectedNet, actualNet, diff, match }
+            })
+            const totalGross = verRows.reduce((s,r) => s + r.basic + r.allowances + r.otPay + r.holPay, 0)
+            const totalDeductions = verRows.reduce((s,r) => s + r.deductions, 0)
+            const totalNet = verRows.reduce((s,r) => s + r.expectedNet, 0)
+            const mismatchCount = verRows.filter(r => !r.match).length
+            return (<div style={{marginTop:12}}>
+              <div className="table-wrap"><table>
+                <thead><tr><th>Worker</th><th>Basic</th><th>÷30÷8 Rate</th><th>Normal Hrs</th><th>OT Hrs (×1.25)</th><th>Holiday Hrs (×1.50)</th><th>OT Pay</th><th>Holiday Pay</th><th>Allowances</th><th>Deductions</th><th>Net Pay</th><th>Check</th></tr></thead>
+                <tbody>
+                  {verRows.map((r, i) => (
+                    <tr key={i} style={{background:r.match?'':'#fef2f2'}}>
+                      <td style={{fontWeight:500,fontSize:12}}>{r.l.worker_name}<div style={{fontSize:10,color:'var(--hint)'}}>{r.l.worker_number}</div></td>
+                      <td style={{fontSize:11}}>{formatCurrency(r.basic)}</td>
+                      <td style={{fontSize:11,fontFamily:'monospace'}}>{r.rate}</td>
+                      <td style={{fontSize:11}}>{r.l.normal_hours||0}h</td>
+                      <td style={{fontSize:11,color:r.l.ot_hours>0?'var(--warning)':'var(--hint)'}}>{r.l.ot_hours||0}h</td>
+                      <td style={{fontSize:11,color:r.l.holiday_hours>0?'var(--danger)':'var(--hint)'}}>{r.l.holiday_hours||0}h</td>
+                      <td style={{fontSize:11,color:'var(--success)'}}>{r.otPay>0?formatCurrency(r.otPay):'—'}</td>
+                      <td style={{fontSize:11,color:'var(--danger)'}}>{r.holPay>0?formatCurrency(r.holPay):'—'}</td>
+                      <td style={{fontSize:11}}>{formatCurrency(r.allowances)}</td>
+                      <td style={{fontSize:11,color:'var(--danger)'}}>{r.deductions>0?formatCurrency(r.deductions):'—'}</td>
+                      <td style={{fontSize:12,fontWeight:600,color:'var(--teal)'}}>{formatCurrency(r.expectedNet)}</td>
+                      <td style={{textAlign:'center'}}>
+                        {r.match
+                          ? <span style={{color:'var(--success)',fontWeight:700}}>✓</span>
+                          : <span style={{color:'var(--danger)',fontWeight:700}}>✗ <span style={{fontSize:10}}>{r.diff>0?'+':''}{formatCurrency(r.diff)}</span></span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table></div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginTop:12}}>
+                <div className="stat-card"><div className="num teal" style={{fontSize:16}}>{formatCurrency(totalGross)}</div><div className="lbl">Total gross</div></div>
+                <div className="stat-card"><div className="num danger" style={{fontSize:16}}>{formatCurrency(totalDeductions)}</div><div className="lbl">Total deductions</div></div>
+                <div className="stat-card"><div className="num success" style={{fontSize:16}}>{formatCurrency(totalNet)}</div><div className="lbl">Total net (calculated)</div></div>
+                <div className="stat-card"><div className={`num ${mismatchCount>0?'danger':'success'}`} style={{fontSize:16}}>{mismatchCount === 0 ? '✓ All match' : mismatchCount + ' mismatch'+(mismatchCount>1?'es':'')}</div><div className="lbl">Verification status</div></div>
+              </div>
+            </div>)
+          })()}
         </div>
       )}
 
