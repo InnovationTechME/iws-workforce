@@ -18,7 +18,11 @@
       "Bash(node scripts/seedReferenceData.mjs)",
       "Bash(ls:*)",
       "Bash(node scripts/runMigration.mjs scripts/migrations/001_three_track_schema.sql)",
-      "Bash(node scripts/runMigrations.mjs)"
+      "Bash(node scripts/runMigrations.mjs)",
+      "Bash(node scripts/initWorkerDocs.mjs)",
+      "mcp__claude_ai_Supabase__list_projects",
+      "mcp__claude_ai_Supabase__list_tables",
+      "mcp__claude_ai_Supabase__execute_sql"
     ]
   }
 }

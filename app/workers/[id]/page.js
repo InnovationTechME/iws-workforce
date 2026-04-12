@@ -6,8 +6,11 @@ import AppShell from '../../../components/AppShell'
 import PageHeader from '../../../components/PageHeader'
 import StatusBadge from '../../../components/StatusBadge'
 import LetterViewer from '../../../components/LetterViewer'
-import { getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS, calculateLeaveBalance, getILOEStatus, updateDocument, generateDocFileName } from '../../../lib/mockStore'
+import { getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS, calculateLeaveBalance, getILOEStatus, updateDocument, generateDocFileName } from '../../../lib/mockStore'
 import { getWorkerById } from '../../../lib/workerService'
+import { getDocumentsByWorker, upsertDocument } from '../../../lib/documentService'
+import { getDocumentTemplate, generateDocumentFilename } from '../../../lib/documentRegister'
+import { getAttendanceByWorker } from '../../../lib/attendanceService'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
 import { offerLetterHTML, warningLetterHTML, experienceLetterHTML, terminationWithNoticeHTML, terminationWithoutNoticeHTML, resignationAcceptanceHTML, policyManualHTML, TERMINATION_GROUNDS_LIST } from '../../../lib/letterTemplates'
 
@@ -18,6 +21,7 @@ export default function WorkerDetailPage() {
   const [certs, setCerts] = useState([])
   const [warnings, setWarnings] = useState([])
   const [letters, setLetters] = useState([])
+  const [attendance, setAttendance] = useState([])
   const [tab, setTab] = useState('profile')
   const [viewerHtml, setViewerHtml] = useState(null)
   const [viewerRef, setViewerRef] = useState('')
@@ -41,7 +45,8 @@ export default function WorkerDetailPage() {
         if (cancelled) return
         setWorker(w)
         if (w) {
-          setDocs(getDocumentsByWorker(id))
+          try { setDocs(await getDocumentsByWorker(id)) } catch (e) { console.error(e); setDocs([]) }
+          try { setAttendance(await getAttendanceByWorker(id)) } catch (e) { setAttendance([]) }
           setCerts(getCertificationsByWorker(id))
           setWarnings(getWarningsByWorker(id))
           setLetters(getLettersByWorker(id))
@@ -58,8 +63,40 @@ export default function WorkerDetailPage() {
   if (!worker) return <AppShell pageTitle="Worker"><div className="page-shell"><div className="panel"><div className="empty-state"><h3>Worker not found</h3></div></div></div></AppShell>
 
   const expiredDocs = docs.filter(d => d.status === 'expired' || d.status === 'missing').length
+  const missingBlocking = docs.filter(d => d.is_blocking && (d.status === 'missing' || d.status === 'expired')).length
   const expiredCerts = certs.filter(c => c.status === 'expired').length
   const warningLevel = getWorkerWarningLevel(id)
+  const activeWarnings = warnings.filter(w => w.status === 'open').length
+
+  const tenureText = (() => {
+    if (!worker.joining_date) return '—'
+    const start = new Date(worker.joining_date)
+    const now = new Date()
+    let months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth())
+    if (now.getDate() < start.getDate()) months--
+    if (months < 0) months = 0
+    const years = Math.floor(months / 12)
+    const rem = months % 12
+    if (years === 0) return `${months} mo${months===1?'':'s'}`
+    return `${years} yr${years===1?'':'s'} ${rem} mo${rem===1?'':'s'}`
+  })()
+
+  const attendancePct = (() => {
+    if (!worker.joining_date) return 100
+    const start = new Date(worker.joining_date)
+    const today = new Date()
+    let workingDays = 0
+    for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+      const dow = d.getDay()
+      if (dow !== 0) workingDays++
+    }
+    if (workingDays === 0) return 100
+    const absent = attendance.filter(a => ['absent_unauthorised','absent_sick','absent_approved','absent'].includes(a.status)).length
+    return Math.max(0, Math.min(100, Math.round(((workingDays - absent) / workingDays) * 1000) / 10))
+  })()
+  const attendanceColor = attendancePct >= 95 ? 'var(--success)' : attendancePct >= 85 ? 'var(--warning)' : 'var(--danger)'
+  const warningColor = activeWarnings === 0 ? 'var(--success)' : activeWarnings <= 2 ? 'var(--warning)' : 'var(--danger)'
+  const docColor = missingBlocking === 0 ? 'var(--success)' : missingBlocking <= 2 ? 'var(--warning)' : 'var(--danger)'
   const warningBadges = { first: [{label:'1st Warning', cls:'badge-1st'}], second: [{label:'1st Warning',cls:'badge-1st'},{label:'2nd Warning',cls:'badge-2nd'}], final: [{label:'1st Warning',cls:'badge-1st'},{label:'2nd Warning',cls:'badge-2nd'},{label:'Final Warning',cls:'badge-final'}], none: [] }
 
   return (
@@ -94,10 +131,10 @@ export default function WorkerDetailPage() {
         </div>
       ) : null })()}
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
-        <div className="stat-card"><div className="num" style={{fontSize:20}}>{worker.payroll_type === 'monthly' ? formatCurrency(worker.monthly_salary) : formatCurrency(worker.hourly_rate) + '/hr'}</div><div className="lbl">Compensation</div></div>
-        <div className="stat-card"><div className={`num ${expiredDocs > 0 ? 'danger' : ''}`} style={{fontSize:20}}>{expiredDocs}</div><div className="lbl">Doc issues</div></div>
-        <div className="stat-card"><div className={`num ${expiredCerts > 0 ? 'danger' : ''}`} style={{fontSize:20}}>{expiredCerts}</div><div className="lbl">Cert issues</div></div>
-        <div className="stat-card"><div className="num" style={{fontSize:20}}>{warnings.filter(w=>w.status==='open').length}</div><div className="lbl">Open warnings</div></div>
+        <div className="stat-card"><div className="num" style={{fontSize:20}}>{tenureText}</div><div className="lbl">Time with Company</div></div>
+        <div className="stat-card"><div className="num" style={{fontSize:20,color:attendanceColor}}>{attendancePct}%</div><div className="lbl">Attendance Rate</div></div>
+        <div className="stat-card"><div className="num" style={{fontSize:20,color:warningColor}}>{activeWarnings}</div><div className="lbl">Active Warnings</div></div>
+        <div className="stat-card"><div className="num" style={{fontSize:20,color:docColor}}>{missingBlocking === 0 ? '0 issues' : `${missingBlocking} missing`}</div><div className="lbl">Doc Status</div></div>
       </div>
 
       <div className="panel">
@@ -187,44 +224,19 @@ export default function WorkerDetailPage() {
           <div>
             {(() => {
               const today = new Date(); today.setHours(0,0,0,0)
-              const PACK_DOCS = [
-                { key:'passport', label:'Passport Copy', tracksExpiry:false, isPack:true },
-                { key:'photo', label:'Passport Photo', tracksExpiry:false, isPack:true },
-                { key:'uae_visa', label:'UAE Visa', tracksExpiry:true, isPack:true },
-                { key:'emirates_id', label:'Emirates ID', tracksExpiry:true, isPack:true },
-                { key:'medical_insurance', label:'Health Insurance', tracksExpiry:true, isPack:false, note:'Compliance only — not in pack' },
-                { key:'workers_compensation', label:'WC Certificate', tracksExpiry:true, isPack:true, requiresHighlight:true },
-              ]
-              const cardFor = (meta) => {
-                const d = docs.find(x => x.document_type === meta.key)
-                const has = d && d.status !== 'missing' && (d.file_name || d.expiry_date)
-                let tone = 'neutral', label = 'Missing', bg = '#f1f5f9', border = '#e2e8f0'
-                if (has) {
-                  if (d.status === 'expired' || (d.expiry_date && new Date(d.expiry_date) < today)) { tone='danger'; label='Expired'; bg='#fef2f2'; border='#fecaca' }
-                  else if (d.status === 'expiring_soon') { tone='warning'; label='Expiring'; bg='#fffbeb'; border='#fde68a' }
-                  else { tone='success'; label='Valid'; bg='#ecfdf5'; border='#6ee7b7' }
+              const PACK_TYPES = ['passport_copy','passport_photo','uae_visa','emirates_id','workmen_compensation']
+              const COMPLIANCE_ONLY = ['health_insurance','health_card']
+              const statusFor = (d) => {
+                if (!d.file_url) return { tone:'neutral', label:'Missing', bg:'#f1f5f9', border:'#e2e8f0' }
+                if (d.expiry_date) {
+                  const exp = new Date(d.expiry_date)
+                  const days = Math.ceil((exp - today) / (1000*60*60*24))
+                  if (days < 0) return { tone:'danger', label:'Expired', bg:'#fef2f2', border:'#fecaca' }
+                  if (days <= 30) return { tone:'warning', label:'Expiring', bg:'#fffbeb', border:'#fde68a' }
                 }
-                const wcHighlightOk = meta.key !== 'workers_compensation' || d?.highlighted_name_confirmed === true
-                const packBlockingExpired = meta.isPack && meta.key === 'workers_compensation' && d?.expiry_date && new Date(d.expiry_date) < today
-                return (
-                  <div key={meta.key} style={{background:bg,border:`1px solid ${border}`,borderRadius:8,padding:'10px 12px'}}>
-                    <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>{meta.label}</div>
-                    <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
-                      <StatusBadge label={label} tone={tone} />
-                      {meta.isPack && <span style={{fontSize:9,fontWeight:600,background:'#0d9488',color:'#fff',padding:'2px 6px',borderRadius:10}}>IN PACK</span>}
-                    </div>
-                    {meta.tracksExpiry && d?.expiry_date && <div style={{fontSize:11,color:'var(--muted)'}}>Expires {formatDate(d.expiry_date)}</div>}
-                    {meta.key === 'workers_compensation' && has && (
-                      <div style={{fontSize:10,marginTop:3,color:wcHighlightOk?'#16a34a':'#dc2626'}}>
-                        {wcHighlightOk ? '✓ Name highlighted' : '⚠ Name not confirmed'}
-                      </div>
-                    )}
-                    {packBlockingExpired && <div style={{fontSize:10,fontWeight:600,marginTop:4,color:'#991b1b',background:'#fee2e2',padding:'3px 6px',borderRadius:4}}>PACK BLOCKED — Renew to restore pack access</div>}
-                    {meta.note && <div style={{fontSize:10,color:'var(--hint)',marginTop:3,fontStyle:'italic'}}>{meta.note}</div>}
-                    <button className="btn btn-teal btn-sm" style={{fontSize:10,padding:'3px 8px',marginTop:6}} onClick={() => { setSelectedDoc(d || { document_type: meta.key, document_category: 'personal', worker_id: id, status: 'missing' }); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:d?.expiry_date||'', file_name:null, file_original:null, notes:'' }) }}>{has ? 'Update' : 'Upload'}</button>
-                  </div>
-                )
+                return { tone:'success', label:'Valid', bg:'#ecfdf5', border:'#6ee7b7' }
               }
+              const packDocs = docs.filter(d => PACK_TYPES.includes(d.doc_type))
               return (
                 <div style={{marginBottom:20,padding:'14px 16px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8}}>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:12}}>
@@ -235,7 +247,32 @@ export default function WorkerDetailPage() {
                     <Link href="/packs" style={{fontSize:12,color:'#0d9488',fontWeight:500}}>Build Pack →</Link>
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:10}}>
-                    {PACK_DOCS.map(cardFor)}
+                    {packDocs.length === 0 ? (
+                      <div style={{gridColumn:'1/-1',fontSize:12,color:'var(--hint)',padding:12,textAlign:'center'}}>No pack document slots yet — run document register init</div>
+                    ) : packDocs.map(d => {
+                      const s = statusFor(d)
+                      const has = !!d.file_url
+                      const isWC = d.doc_type === 'workmen_compensation'
+                      const wcOk = d.highlighted_name_confirmed === true
+                      const packBlocked = isWC && d.expiry_date && new Date(d.expiry_date) < today
+                      return (
+                        <div key={d.id} style={{background:s.bg,border:`1px solid ${s.border}`,borderRadius:8,padding:'10px 12px'}}>
+                          <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>{d.label}</div>
+                          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+                            <StatusBadge label={s.label} tone={s.tone} />
+                            <span style={{fontSize:9,fontWeight:600,background:'#0d9488',color:'#fff',padding:'2px 6px',borderRadius:10}}>IN PACK</span>
+                          </div>
+                          {d.expiry_date && <div style={{fontSize:11,color:'var(--muted)'}}>Expires {formatDate(d.expiry_date)}</div>}
+                          {isWC && has && (
+                            <div style={{fontSize:10,marginTop:3,color:wcOk?'#16a34a':'#dc2626'}}>
+                              {wcOk ? '✓ Name highlighted' : '⚠ Not confirmed'}
+                            </div>
+                          )}
+                          {packBlocked && <div style={{fontSize:10,fontWeight:600,marginTop:4,color:'#991b1b',background:'#fee2e2',padding:'3px 6px',borderRadius:4}}>PACK BLOCKED</div>}
+                          <button className="btn btn-teal btn-sm" style={{fontSize:10,padding:'3px 8px',marginTop:6}} onClick={() => { setSelectedDoc(d); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:d.expiry_date||'', file_name:null, file_original:null, notes:'' }) }}>{has ? 'Update' : 'Upload'}</button>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )
@@ -244,18 +281,39 @@ export default function WorkerDetailPage() {
             <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6}}>All documents on file</div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Type</th><th>Category</th><th>Issue date</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
+                <thead><tr><th>Document</th><th>Status</th><th>Expiry</th><th>File</th><th>Action</th></tr></thead>
                 <tbody>
-                  {docs.length === 0 ? <tr><td colSpan={6} style={{textAlign:'center',color:'var(--hint)',padding:32}}>No documents recorded</td></tr> : docs.map(d => (
-                    <tr key={d.id} style={{cursor:'pointer'}} onClick={() => { setSelectedDoc(d); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:'', file_name:null, file_original:null, notes:'' }) }}>
-                      <td style={{fontWeight:500}}>{d.document_type}</td>
-                      <td><StatusBadge label={d.document_category} tone="neutral" /></td>
-                      <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(d.issue_date)}</td>
-                      <td style={{fontSize:12,color:d.status==='expired'?'var(--danger)':d.status==='expiring_soon'?'var(--warning)':'var(--muted)'}}>{formatDate(d.expiry_date)}</td>
-                      <td><StatusBadge label={d.status} tone={getStatusTone(d.status)} /></td>
-                      <td style={{fontSize:11,color:'var(--hint)'}}>📎 Click to view / update</td>
-                    </tr>
-                  ))}
+                  {docs.length === 0 ? <tr><td colSpan={5} style={{textAlign:'center',color:'var(--hint)',padding:32}}>No documents recorded</td></tr> : docs.map(d => {
+                    const today = new Date(); today.setHours(0,0,0,0)
+                    const has = !!d.file_url
+                    let statusLabel = 'Missing', statusTone = 'neutral'
+                    if (has) {
+                      if (d.expiry_date) {
+                        const days = Math.ceil((new Date(d.expiry_date) - today) / (1000*60*60*24))
+                        if (days < 0) { statusLabel='Expired'; statusTone='danger' }
+                        else if (days <= 30) { statusLabel='Expiring Soon'; statusTone='warning' }
+                        else { statusLabel='Valid'; statusTone='success' }
+                      } else { statusLabel='Valid'; statusTone='success' }
+                    }
+                    const compliance = ['health_insurance','health_card'].includes(d.doc_type)
+                    const fileName = d.file_url ? d.file_url.split('/').pop() : generateDocumentFilename(worker, d.doc_type, 'pdf')
+                    return (
+                      <tr key={d.id}>
+                        <td>
+                          <div style={{fontWeight:500}}>{d.label}</div>
+                          {compliance && <div style={{fontSize:10,color:'var(--hint)',fontStyle:'italic',marginTop:2}}>Compliance tracking only — not included in document pack</div>}
+                        </td>
+                        <td><StatusBadge label={statusLabel} tone={statusTone} /></td>
+                        <td style={{fontSize:12,color:statusTone==='danger'?'var(--danger)':statusTone==='warning'?'var(--warning)':'var(--muted)'}}>{d.expiry_date ? formatDate(d.expiry_date) : '—'}</td>
+                        <td style={{fontSize:11,color:has?'var(--text)':'var(--hint)'}}>
+                          {has ? <a href={d.file_url} target="_blank" rel="noreferrer" style={{color:'#0d9488'}}>📎 {fileName}</a> : <span style={{fontStyle:'italic'}}>Not uploaded</span>}
+                        </td>
+                        <td>
+                          <button className="btn btn-teal btn-sm" style={{fontSize:11}} onClick={() => { setSelectedDoc(d); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:d.expiry_date||'', file_name:null, file_original:null, notes:'' }) }}>{has ? 'Update' : 'Upload'}</button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -267,7 +325,7 @@ export default function WorkerDetailPage() {
                 <div style={{position:'relative',width:420,height:'100vh',background:'#fff',borderLeft:'0.5px solid var(--border)',padding:24,overflowY:'auto',display:'flex',flexDirection:'column',gap:16,boxShadow:'-8px 0 32px rgba(15,23,42,.08)'}} onClick={e => e.stopPropagation()}>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',paddingBottom:16,borderBottom:'0.5px solid var(--border)'}}>
                     <div>
-                      <div style={{fontSize:15,fontWeight:600}}>{selectedDoc.document_type}</div>
+                      <div style={{fontSize:15,fontWeight:600}}>{selectedDoc.label || selectedDoc.doc_type}</div>
                       <div style={{fontSize:12,color:'var(--muted)',marginTop:3}}>{worker.full_name} · {worker.worker_number}</div>
                     </div>
                     <button className="btn btn-ghost btn-sm" onClick={() => setSelectedDoc(null)}>✕</button>
@@ -277,17 +335,17 @@ export default function WorkerDetailPage() {
                   <div>
                     <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',marginBottom:8}}>Current Document</div>
                     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                      <div><div style={{fontSize:11,color:'var(--hint)'}}>Category</div><StatusBadge label={selectedDoc.document_category} tone="neutral" /></div>
+                      <div><div style={{fontSize:11,color:'var(--hint)'}}>Doc type</div><StatusBadge label={selectedDoc.doc_type} tone="neutral" /></div>
                       <div><div style={{fontSize:11,color:'var(--hint)'}}>Status</div><StatusBadge label={selectedDoc.status} tone={getStatusTone(selectedDoc.status)} /></div>
                       <div><div style={{fontSize:11,color:'var(--hint)'}}>Issue date</div><div style={{fontSize:13,fontWeight:500}}>{formatDate(selectedDoc.issue_date)}</div></div>
-                      <div><div style={{fontSize:11,color:'var(--hint)'}}>Expiry date</div><div style={{fontSize:13,fontWeight:500,color:selectedDoc.status==='expired'?'var(--danger)':selectedDoc.status==='expiring_soon'?'var(--warning)':'var(--text)'}}>{formatDate(selectedDoc.expiry_date)}</div></div>
+                      <div><div style={{fontSize:11,color:'var(--hint)'}}>Expiry date</div><div style={{fontSize:13,fontWeight:500}}>{formatDate(selectedDoc.expiry_date)}</div></div>
                     </div>
-                    {selectedDoc.file_name ? (
-                      <div style={{marginTop:10,padding:'8px 12px',background:'var(--success-bg)',border:'1px solid var(--success-border)',borderRadius:6,fontSize:12}}>
-                        <span style={{color:'var(--success)'}}>📎 {selectedDoc.file_name}</span>
+                    {selectedDoc.file_url ? (
+                      <div style={{marginTop:10,padding:'8px 12px',background:'#ecfdf5',border:'1px solid #6ee7b7',borderRadius:6,fontSize:12}}>
+                        <a href={selectedDoc.file_url} target="_blank" rel="noreferrer" style={{color:'#065f46'}}>📎 {selectedDoc.file_url.split('/').pop()}</a>
                       </div>
                     ) : (
-                      <div style={{marginTop:10,padding:'8px 12px',background:'var(--warning-bg)',border:'1px solid var(--warning-border)',borderRadius:6,fontSize:12,color:'var(--warning)'}}>No file uploaded yet</div>
+                      <div style={{marginTop:10,padding:'8px 12px',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:6,fontSize:12,color:'#92400e'}}>No file uploaded yet</div>
                     )}
                   </div>
 
@@ -300,8 +358,7 @@ export default function WorkerDetailPage() {
                         <input type="file" className="form-input" accept=".pdf,.jpg,.jpeg,.png" onChange={e => {
                           const file = e.target.files[0]
                           if (!file) return
-                          const ext = file.name.split('.').pop()
-                          const autoName = generateDocFileName(worker, selectedDoc.document_type, ext)
+                          const autoName = generateDocumentFilename(worker, selectedDoc.doc_type, file.name)
                           setDocForm({...docForm, file_name:autoName, file_original:file.name})
                         }} />
                         {docForm.file_name && <div style={{fontSize:11,color:'var(--teal)',marginTop:4}}>📎 {docForm.file_name}{docForm.file_original && docForm.file_original !== docForm.file_name ? <span style={{color:'var(--hint)',marginLeft:6}}>({docForm.file_original})</span> : ''}</div>}
@@ -311,15 +368,18 @@ export default function WorkerDetailPage() {
                         <div className="form-field"><label className="form-label">New expiry date *</label><input className="form-input" type="date" value={docForm.expiry_date} onChange={e => setDocForm({...docForm, expiry_date:e.target.value})} /></div>
                       </div>
                       <div className="form-field"><label className="form-label">Notes</label><textarea className="form-textarea" value={docForm.notes} onChange={e => setDocForm({...docForm, notes:e.target.value})} rows={2} /></div>
-                      <button className="btn btn-primary" onClick={() => {
-                        if (!docForm.expiry_date) { alert('Expiry date is required'); return }
+                      <button className="btn btn-primary" onClick={async () => {
                         const today = new Date()
-                        const exp = new Date(docForm.expiry_date)
-                        const daysUntil = Math.ceil((exp - today) / (1000*60*60*24))
-                        const newStatus = daysUntil < 0 ? 'expired' : daysUntil <= 30 ? 'expiring_soon' : 'valid'
-                        updateDocument(selectedDoc.id, { issue_date:docForm.issue_date, expiry_date:docForm.expiry_date, file_name:docForm.file_name||selectedDoc.file_name, notes:docForm.notes, status:newStatus })
-                        setDocs(getDocumentsByWorker(id))
-                        setSelectedDoc(null)
+                        let newStatus = 'valid'
+                        if (docForm.expiry_date) {
+                          const daysUntil = Math.ceil((new Date(docForm.expiry_date) - today) / (1000*60*60*24))
+                          newStatus = daysUntil < 0 ? 'expired' : daysUntil <= 30 ? 'expiring_soon' : 'valid'
+                        }
+                        try {
+                          await upsertDocument(id, selectedDoc.doc_type, { label:selectedDoc.label, is_blocking:selectedDoc.is_blocking, issue_date:docForm.issue_date || null, expiry_date:docForm.expiry_date || null, file_url:docForm.file_name || selectedDoc.file_url || null, status:newStatus })
+                          setDocs(await getDocumentsByWorker(id))
+                          setSelectedDoc(null)
+                        } catch (err) { alert('Save failed: ' + err.message) }
                       }}>Save &amp; Update</button>
                     </div>
                   </div>
