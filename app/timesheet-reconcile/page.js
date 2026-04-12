@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
-import { getTimesheetHeaders, getTimesheetLines, getWorkers, addDiscrepancy, getDiscrepancies, resolveDiscrepancy, getPendingDiscrepancies, makeId } from '../../lib/mockStore'
+import { getTimesheetHeaders, getTimesheetLines, getVisibleWorkers, addDiscrepancy, getDiscrepancies, resolveDiscrepancy, getPendingDiscrepancies, makeId } from '../../lib/mockStore'
 import { formatDate } from '../../lib/utils'
 
 export default function TimesheetReconcilePage() {
@@ -17,7 +17,7 @@ export default function TimesheetReconcilePage() {
   const [uploadError, setUploadError] = useState(null)
   const [filter, setFilter] = useState('all')
 
-  useEffect(() => { setHeaders(getTimesheetHeaders()); setWorkers(getWorkers()) }, [])
+  useEffect(() => { setHeaders(getTimesheetHeaders()); setWorkers(getVisibleWorkers()) }, [])
 
   const loadDiscrepancies = (header_id) => { setDiscrepancies(getDiscrepancies(header_id)) }
 

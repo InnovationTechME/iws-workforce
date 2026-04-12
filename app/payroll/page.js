@@ -1,11 +1,13 @@
 'use client'
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
-import { getAllPayrollBatches, getPayrollBatchByMonth, getPayrollLinesByBatch, canEditPayrollBatch, unlockPayrollBatch, addCorrectionNote, getPayrollBatch, getPayrollLines, updatePayrollBatch, addPayrollAdjustment, getPenaltyDeductions, confirmPenaltyDeduction, removePenaltyDeduction, getRamadanMode, getWorkers, getTimesheetHeaders, getTimesheetLines, isPublicHoliday, getPublicHolidays } from '../../lib/mockStore'
+import LetterViewer from '../../components/LetterViewer'
+import { getAllPayrollBatches, getPayrollBatchByMonth, getPayrollLinesByBatch, canEditPayrollBatch, unlockPayrollBatch, addCorrectionNote, getPayrollBatch, getPayrollLines, updatePayrollBatch, addPayrollAdjustment, getPenaltyDeductions, confirmPenaltyDeduction, removePenaltyDeduction, getRamadanMode, getVisibleWorkers, getTimesheetHeaders, getTimesheetLines, getAllTimesheetLines, updateTimesheetLine, isPublicHoliday, getPublicHolidays, calculateLeaveBalance, getWorker, getPayrollHistoryByYear, getPayrollYearSummary, getRetentionStatus, getPendingConflicts, getPendingCarryOverNotes, autoResolveExpiredConflicts, resolveCarryOverNote } from '../../lib/mockStore'
 import { formatCurrency, getStatusTone } from '../../lib/utils'
 import { canAccess, getRole } from '../../lib/mockAuth'
+import { payslipHTML } from '../../lib/letterTemplates'
 
 export default function PayrollPage() {
   const [allBatches, setAllBatches] = useState([])
@@ -27,6 +29,12 @@ export default function PayrollPage() {
   const [selectedTsHeader, setSelectedTsHeader] = useState(null)
   const [tsHeaders, setTsHeaders] = useState([])
   const [showVerification, setShowVerification] = useState(false)
+  const [gridViewMode, setGridViewMode] = useState('daily')
+  const [gridClient, setGridClient] = useState('all')
+  const [conflictPopover, setConflictPopover] = useState(null)
+  const [gridKey, setGridKey] = useState(0)
+  const [payslipViewer, setPayslipViewer] = useState(null)
+  const [showWhatsApp, setShowWhatsApp] = useState(false)
 
   useEffect(() => {
     // Check for pending timesheet data from upload page
@@ -48,7 +56,7 @@ export default function PayrollPage() {
       loadBatch(batches[0].month)
     }
     setPenalties(getPenaltyDeductions())
-    setOfficeStaff(getWorkers().filter(w => w.category === 'Office Staff' && w.active !== false))
+    setOfficeStaff(getVisibleWorkers().filter(w => w.category === 'Office Staff' && w.active !== false))
     const hdrs = getTimesheetHeaders()
     setTsHeaders(hdrs)
     if (hdrs.length > 0) setSelectedTsHeader(hdrs[0].id)
@@ -71,14 +79,14 @@ export default function PayrollPage() {
 
   const handleUnlock = () => {
     if (!unlockReason.trim()) return
-    unlockPayrollBatch(batch.id, 'Owner', unlockReason)
+    unlockPayrollBatch(batch.id, 'Management', unlockReason)
     setShowUnlock(false); setUnlockReason('')
     setAllBatches(getAllPayrollBatches()); loadBatch(selectedMonth)
   }
 
   const handleAddCorrection = () => {
     if (!correctionNote.trim()) return
-    addCorrectionNote(batch.id, correctionNote, role === 'owner' ? 'Owner' : 'HR Admin')
+    addCorrectionNote(batch.id, correctionNote, role === 'owner' ? 'Management' : 'HR Admin')
     setShowCorrection(false); setCorrectionNote('')
     loadBatch(selectedMonth)
   }
@@ -107,7 +115,7 @@ export default function PayrollPage() {
     setAdjForm({ type:'allowance', label:'', amount:'' })
   }
 
-  return (
+  return (<>
     <AppShell pageTitle="Payroll">
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:20}}>
         <div>
@@ -120,6 +128,39 @@ export default function PayrollPage() {
             {allBatches.map(b => <option key={b.id} value={b.month}>{b.month_label}{b.locked ? ' 🔒' : ''}{b.status === 'draft' ? ' (Draft)' : ''}</option>)}
           </select>
           <StatusBadge label={batch.locked ? '🔒 Locked' : batch.status} tone={batch.locked ? 'danger' : batch.status === 'ready_for_review' ? 'warning' : 'neutral'} />
+          <button className="btn btn-teal btn-sm" onClick={async () => {
+            const JSZip = (await import('jszip')).default
+            const zip = new JSZip()
+            const monthLabel = (batch.month_label||batch.month).replace(/\s+/g,'_')
+            const folder = zip.folder(monthLabel+'_Payslips')
+            const allW = getVisibleWorkers()
+            lines.forEach(l => {
+              const w = allW.find(wk => wk.id === l.worker_id) || { full_name:l.worker_name, worker_number:l.worker_number, category:l.category }
+              const lb = calculateLeaveBalance(l.worker_id)
+              const allPL = getPayrollLines()
+              const yearLines = allPL.filter(pl => pl.worker_id === l.worker_id)
+              const ytdData = { grossYtd:yearLines.reduce((s,p)=>s+(p.gross_pay||0),0), deductionsYtd:yearLines.reduce((s,p)=>s+(p.deductions_total||0)+(p.advances_total||0),0), netYtd:yearLines.reduce((s,p)=>s+(p.net_pay||0),0) }
+              const isFlat = w.category==='Contract Worker'||w.category==='Subcontract Worker'
+              const aLines = []
+              if (!isFlat) {
+                if (w.housing_allowance>0) aLines.push({label:'Housing Allowance',amount:w.housing_allowance})
+                if (w.transport_allowance>0) aLines.push({label:'Transport Allowance',amount:w.transport_allowance})
+                if (w.food_allowance>0) aLines.push({label:'Food / Meal Allowance',amount:w.food_allowance})
+              }
+              const dLines = []
+              if (l.deductions_total>0) dLines.push({label:'Deductions',amount:l.deductions_total})
+              if (l.advances_total>0) dLines.push({label:'Advance Recovery',amount:l.advances_total})
+              if (w.iloe_monthly_deduction>0) dLines.push({label:'ILOE Insurance',amount:w.iloe_monthly_deduction})
+              const html = payslipHTML(w, l, batch, { leaveBalance:lb, ytd:ytdData, ramadanActive:getRamadanMode()?.active, allowanceLines:aLines, deductionLines:dLines })
+              const safeName = (w.full_name||'').replace(/\s+/g,'')
+              folder.file(`${w.worker_number}_${safeName}_${monthLabel}.html`, html)
+            })
+            const blob = await zip.generateAsync({type:'blob'})
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url; a.download = `Innovation_Payslips_${monthLabel}.zip`; a.click()
+            URL.revokeObjectURL(url)
+          }}>Download All Payslips</button>
         </div>
       </div>
 
@@ -138,7 +179,7 @@ export default function PayrollPage() {
             {role === 'owner' && (
               <div style={{display:'flex',gap:8,flexShrink:0}}>
                 <button className="btn btn-secondary" onClick={() => setShowCorrection(true)}>Add Correction Note</button>
-                <button className="btn btn-danger" onClick={() => setShowUnlock(true)}>🔓 Unlock (Owner Only)</button>
+                <button className="btn btn-danger" onClick={() => setShowUnlock(true)}>🔓 Unlock (Management Only)</button>
               </div>
             )}
           </div>
@@ -174,6 +215,78 @@ export default function PayrollPage() {
         ))}
       </div>
 
+      {/* WhatsApp Numbers Panel */}
+      <div style={{marginBottom:16}}>
+        <button className="btn btn-ghost btn-sm" style={{fontSize:12}} onClick={() => setShowWhatsApp(!showWhatsApp)}>{showWhatsApp ? '▲' : '▼'} WhatsApp Numbers</button>
+        {showWhatsApp && (
+          <div className="panel" style={{marginTop:8}}>
+            <div style={{fontSize:11,color:'var(--hint)',marginBottom:10,fontStyle:'italic'}}>WhatsApp distribution available in Supabase phase. Prepare numbers now — add via worker profile.</div>
+            <div className="table-wrap"><table>
+              <thead><tr><th>Worker</th><th>WhatsApp</th><th>Payslip</th></tr></thead>
+              <tbody>{lines.map(l => {
+                const w = getVisibleWorkers().find(wk => wk.id === l.worker_id)
+                return (<tr key={l.id}><td style={{fontWeight:500,fontSize:12}}>{l.worker_name}<div style={{fontSize:10,color:'var(--hint)'}}>{l.worker_number}</div></td><td style={{fontSize:12,fontFamily:'monospace'}}>{w?.whatsapp_number || <span style={{color:'var(--hint)'}}>Not set</span>}</td><td>{l.payslip_sent ? <StatusBadge label="Sent" tone="success" /> : <StatusBadge label="Pending" tone="neutral" />}</td></tr>)
+              })}</tbody>
+            </table></div>
+            <button className="btn btn-secondary btn-sm" style={{marginTop:8}} onClick={() => {
+              const csv = 'Worker Name,Worker Number,WhatsApp Number\n' + lines.map(l => {
+                const w = getVisibleWorkers().find(wk => wk.id === l.worker_id)
+                return `"${l.worker_name}","${l.worker_number}","${w?.whatsapp_number||''}"`
+              }).join('\n')
+              const blob = new Blob([csv], {type:'text/csv'})
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a'); a.href = url; a.download = 'whatsapp_numbers.csv'; a.click()
+              URL.revokeObjectURL(url)
+            }}>Export Number List</button>
+          </div>
+        )}
+      </div>
+
+      {/* Payroll Run Checklist */}
+      {!batch.locked && (() => {
+        const pendConflicts = getPendingConflicts()
+        const hrClarified = (typeof getAttendanceConflicts !== 'undefined' ? [] : []).length // imported via getPendingConflicts
+        const carryOvers = getPendingCarryOverNotes()
+        const pendingPenalties = penalties.filter(p => p.status === 'pending_hr_confirmation').length
+        const today = new Date()
+        const dueDate = new Date(today.getFullYear(), today.getMonth(), 17)
+        const daysUntilDue = Math.ceil((dueDate - today) / (1000*60*60*24))
+        return (
+        <div className="panel" style={{marginBottom:16,border:'1px solid #fde68a',background:'#fffefb'}}>
+          <div className="panel-header"><div><h2>Before approving payroll — complete these items</h2></div></div>
+          <div style={{display:'flex',flexDirection:'column',gap:8}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,padding:'6px 0'}}>
+              <span style={{fontSize:16}}>{pendConflicts.length === 0 ? '✅' : '🔴'}</span>
+              <div style={{flex:1}}>
+                {pendConflicts.length === 0
+                  ? <span style={{fontSize:12,color:'#16a34a',fontWeight:600}}>No pending attendance conflicts</span>
+                  : <span style={{fontSize:12,color:'#dc2626',fontWeight:600}}>{pendConflicts.length} conflict{pendConflicts.length!==1?'s':''} require resolution</span>}
+              </div>
+              {pendConflicts.length > 0 && <a href="/attendance" style={{fontSize:11,color:'var(--teal)'}}>Review conflicts →</a>}
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:10,padding:'6px 0'}}>
+              <span style={{fontSize:16}}>{carryOvers.length === 0 ? '✅' : '🟡'}</span>
+              <div style={{flex:1}}>
+                {carryOvers.length === 0
+                  ? <span style={{fontSize:12,color:'#16a34a',fontWeight:600}}>No carry-over items</span>
+                  : <span style={{fontSize:12,color:'#d97706',fontWeight:600}}>{carryOvers.length} carry-over note{carryOvers.length!==1?'s':''} from last month</span>}
+              </div>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:10,padding:'6px 0'}}>
+              <span style={{fontSize:16}}>{pendingPenalties === 0 ? '✅' : '🟡'}</span>
+              <span style={{fontSize:12,color:pendingPenalties>0?'#d97706':'#16a34a',fontWeight:600}}>{pendingPenalties === 0 ? 'All penalties confirmed' : `${pendingPenalties} pending penalty confirmation${pendingPenalties!==1?'s':''}`}</span>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:10,padding:'6px 0'}}>
+              <span style={{fontSize:16}}>{daysUntilDue > 3 ? '⏱' : daysUntilDue > 0 ? '🟠' : '🚨'}</span>
+              <span style={{fontSize:12,fontWeight:600,color:daysUntilDue<=0?'#dc2626':daysUntilDue<=3?'#d97706':'var(--muted)'}}>{daysUntilDue > 3 ? `Payroll due ${dueDate.toLocaleDateString('en-GB',{day:'numeric',month:'short'})}` : daysUntilDue > 0 ? `Payroll due in ${daysUntilDue} day${daysUntilDue!==1?'s':''}` : 'OVERDUE — Payroll should have been approved'}</span>
+            </div>
+          </div>
+          {pendConflicts.filter(c => new Date(c.auto_resolve_date) <= today).length > 0 && (
+            <button className="btn btn-secondary btn-sm" style={{marginTop:8}} onClick={() => { const notes = autoResolveExpiredConflicts(); alert(`Auto-resolved ${notes.length} conflict(s). ${notes.length} carry-over note(s) created.`) }}>Run Auto-Resolve</button>
+          )}
+        </div>)
+      })()}
+
       {/* Timesheet Payroll Preview */}
       {timesheetPayroll && (
         <div className="panel" style={{marginBottom:16,border:'2px solid var(--teal-border)',background:'var(--teal-bg)'}}>
@@ -181,7 +294,7 @@ export default function PayrollPage() {
           <div className="table-wrap"><table>
             <thead><tr><th>Worker</th><th>Total Hrs</th><th>Regular</th><th>OT</th><th>Holiday</th><th>Basic</th><th>OT Pay</th><th>Holiday Pay</th><th>Allowances</th><th>ILOE</th><th>Net Pay</th></tr></thead>
             <tbody>{(timesheetPayroll.workers||[]).map((w, i) => {
-              const worker = getWorkers().find(wk => wk.id === w.worker_id)
+              const worker = getVisibleWorkers().find(wk => wk.id === w.worker_id)
               if (!worker) return null
               const baseHourlyRate = worker.monthly_salary / 30 / 8
               const weekdayOtPay = Math.round(w.ot_hours * baseHourlyRate * 1.25 * 100) / 100
@@ -226,11 +339,128 @@ export default function PayrollPage() {
       <div style={{display:'grid',gridTemplateColumns:'1fr 340px',gap:16}}>
         <div className="panel">
           <div className="tabs">
-            {[['all','All'],['direct','Direct'],['hourly','Hourly'],['sub','Sub'],['office','Office'],['timesheet_review','📋 Timesheet Review']].map(([key,label]) => (
+            {[['all','All'],['direct','Direct'],['hourly','Hourly'],['sub','Sub'],['office','Office'],['timesheet_review','Timesheet Review'],['archive','Archive']].map(([key,label]) => (
               <button key={key} className={`tab${tab===key?' active':''}`} onClick={() => setTab(key)}>{label}</button>
             ))}
           </div>
-          {tab !== 'timesheet_review' ? (
+          {tab === 'archive' ? (() => {
+            const years = [2026, 2025, 2024, 2023, 2022]
+            const expandedYears = typeof window !== 'undefined' ? (window.__archiveExpanded || {}) : {}
+            const toggleYear = (y) => { if (typeof window !== 'undefined') { window.__archiveExpanded = {...(window.__archiveExpanded||{}), [y]:!(window.__archiveExpanded||{})[y]}; setGridKey(k=>k+1) } }
+            return (<div style={{padding:0}}>
+              <div style={{marginBottom:20}}>
+                <h2 style={{fontSize:20,fontWeight:700,margin:'0 0 4px'}}>Payroll Archive — 5 Year Record</h2>
+                <p style={{fontSize:12,color:'var(--muted)',margin:'0 0 10px'}}>Records retained per UAE Labour Law Federal Decree-Law No. 33 of 2021.<br/>Minimum retention: 2 years post-termination. IWS policy: 5 years.</p>
+                <span style={{display:'inline-block',background:'#dcfce7',color:'#166534',fontSize:11,fontWeight:600,borderRadius:20,padding:'4px 12px'}}>&#10003; UAE Compliant — 5 Year Retention Policy</span>
+              </div>
+
+              {years.map(year => {
+                const yearBatches = getPayrollHistoryByYear(year)
+                const yearSummary = getPayrollYearSummary(year)
+                const expanded = expandedYears[year]
+                const totalGross = yearSummary?.total_gross || yearBatches.reduce((s,b) => s + (b.total_gross||0), 0)
+                const totalNet = yearSummary?.total_net || yearBatches.reduce((s,b) => s + (b.total_net||0), 0)
+                const allLocked = yearBatches.length > 0 && yearBatches.every(b => b.locked)
+                const unlockedCount = yearBatches.filter(b => !b.locked).length
+
+                return (
+                <div key={year} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,marginBottom:10,overflow:'hidden'}}>
+                  <div onClick={() => toggleYear(year)} style={{padding:'12px 16px',display:'flex',alignItems:'center',gap:16,cursor:'pointer'}}>
+                    <div style={{fontSize:18,fontWeight:700,color:'#0f172a',minWidth:60}}>{year}</div>
+                    <div style={{fontSize:11,color:'var(--muted)'}}>{yearBatches.length}/12 months</div>
+                    {yearBatches.length > 0 ? <>
+                      <div style={{fontSize:11,color:'var(--teal)',fontWeight:600}}>Gross: {formatCurrency(totalGross)}</div>
+                      <div style={{fontSize:11,color:'var(--success)',fontWeight:600}}>Net: {formatCurrency(totalNet)}</div>
+                      <span style={{fontSize:10,fontWeight:600,borderRadius:10,padding:'2px 8px',background:allLocked?'#dcfce7':'#fef3c7',color:allLocked?'#166534':'#92400e'}}>{allLocked ? 'All locked ✓' : unlockedCount+' unlocked ⚠'}</span>
+                    </> : <div style={{fontSize:11,color:'var(--hint)',fontStyle:'italic'}}>No records on file</div>}
+                    <div style={{marginLeft:'auto',fontSize:12,color:'var(--muted)'}}>{expanded ? '▲' : '▼'} View months</div>
+                  </div>
+
+                  {expanded && yearBatches.length > 0 && (
+                  <div style={{borderTop:'1px solid var(--border)',padding:0}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                      <thead><tr style={{background:'#f1f5f9'}}>
+                        <th style={{padding:'6px 10px',textAlign:'left'}}>Month</th>
+                        <th style={{padding:'6px 8px',textAlign:'center'}}>Workers</th>
+                        <th style={{padding:'6px 8px',textAlign:'right'}}>Gross</th>
+                        <th style={{padding:'6px 8px',textAlign:'right'}}>Net</th>
+                        <th style={{padding:'6px 8px',textAlign:'right'}}>WPS</th>
+                        <th style={{padding:'6px 8px',textAlign:'right'}}>Non-WPS</th>
+                        <th style={{padding:'6px 8px',textAlign:'right'}}>Cash</th>
+                        <th style={{padding:'6px 8px',textAlign:'left'}}>Locked By</th>
+                        <th style={{padding:'6px 8px',textAlign:'left'}}>Lock Date</th>
+                        <th style={{padding:'6px 8px',textAlign:'left'}}>Retention</th>
+                        <th style={{padding:'6px 8px',textAlign:'center'}}>Actions</th>
+                      </tr></thead>
+                      <tbody>
+                        {yearBatches.map(b => {
+                          const retention = getRetentionStatus(b)
+                          const retColor = !b.locked ? '#dc2626' : retention.years_remaining <= 1 ? '#d97706' : '#16a34a'
+                          const retBg = !b.locked ? '#fee2e2' : retention.years_remaining <= 1 ? '#fef3c7' : '#dcfce7'
+                          return (
+                          <tr key={b.id} style={{borderBottom:'1px solid #f1f5f9'}}>
+                            <td style={{padding:'6px 10px',fontWeight:500}}>{b.month_label}</td>
+                            <td style={{padding:'6px 8px',textAlign:'center'}}>{b.total_workers || '—'}</td>
+                            <td style={{padding:'6px 8px',textAlign:'right',color:'var(--teal)',fontWeight:600}}>{b.total_gross ? formatCurrency(b.total_gross) : '—'}</td>
+                            <td style={{padding:'6px 8px',textAlign:'right',color:'var(--success)',fontWeight:600}}>{b.total_net ? formatCurrency(b.total_net) : '—'}</td>
+                            <td style={{padding:'6px 8px',textAlign:'right',fontSize:10}}>{b.wps_total ? formatCurrency(b.wps_total) : '—'}</td>
+                            <td style={{padding:'6px 8px',textAlign:'right',fontSize:10}}>{b.non_wps_total ? formatCurrency(b.non_wps_total) : '—'}</td>
+                            <td style={{padding:'6px 8px',textAlign:'right',fontSize:10}}>{b.cash_total ? formatCurrency(b.cash_total) : '—'}</td>
+                            <td style={{padding:'6px 8px',fontSize:10}}>{b.locked_by || '—'}</td>
+                            <td style={{padding:'6px 8px',fontSize:10}}>{b.locked_at ? new Date(b.locked_at).toLocaleDateString('en-GB') : '—'}</td>
+                            <td style={{padding:'6px 8px'}}><span style={{fontSize:9,fontWeight:600,background:retBg,color:retColor,borderRadius:10,padding:'2px 8px',whiteSpace:'nowrap'}}>{!b.locked ? '⚠ Not locked' : retention.years_remaining <= 1 ? '⚠ Expires soon' : '✓ '+retention.message}</span></td>
+                            <td style={{padding:'6px 8px',textAlign:'center'}}>
+                              <button className="btn btn-ghost btn-sm" style={{fontSize:10,padding:'2px 6px'}} onClick={() => { handleMonthChange(b.month); setTab('all') }}>View</button>
+                            </td>
+                          </tr>)
+                        })}
+                      </tbody>
+                    </table>
+                  </div>)}
+
+                  {expanded && yearBatches.length === 0 && (
+                    <div style={{borderTop:'1px solid var(--border)',padding:'16px',color:'var(--hint)',fontSize:12,fontStyle:'italic'}}>No records on file for this year</div>
+                  )}
+                </div>)
+              })}
+
+              {/* Compliance Summary */}
+              <div style={{marginTop:24,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,padding:16}}>
+                <div style={{fontSize:14,fontWeight:700,color:'#0f172a',marginBottom:4}}>UAE Record Retention Compliance Status</div>
+                <div style={{fontSize:11,color:'var(--muted)',marginBottom:12}}>Federal Decree-Law No. 33 of 2021 — Employer obligations</div>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead><tr style={{background:'#f1f5f9'}}>
+                    <th style={{padding:'8px 12px',textAlign:'left',borderBottom:'2px solid var(--border)'}}>Record Type</th>
+                    <th style={{padding:'8px 12px',textAlign:'center',borderBottom:'2px solid var(--border)'}}>Required</th>
+                    <th style={{padding:'8px 12px',textAlign:'center',borderBottom:'2px solid var(--border)'}}>IWS Policy</th>
+                    <th style={{padding:'8px 12px',textAlign:'center',borderBottom:'2px solid var(--border)'}}>Status</th>
+                  </tr></thead>
+                  <tbody>
+                    {[
+                      ['Payroll records','2 years','5 years','✓ Active','#16a34a','#dcfce7'],
+                      ['Timesheets','2 years','5 years','✓ Active','#16a34a','#dcfce7'],
+                      ['Warning letters','2 years','5 years','✓ Active','#16a34a','#dcfce7'],
+                      ['WPS payment records','2 years','5 years','✓ Active','#16a34a','#dcfce7'],
+                      ['Worker documents','2 years','5 years','⏳ Supabase','#d97706','#fef3c7'],
+                      ['Employment contracts','2 years','5 years','⏳ Supabase','#d97706','#fef3c7'],
+                    ].map(([type,req,iws,status,color,bg]) => (
+                      <tr key={type} style={{borderBottom:'1px solid #f1f5f9'}}>
+                        <td style={{padding:'6px 12px',fontWeight:500}}>{type}</td>
+                        <td style={{padding:'6px 12px',textAlign:'center'}}>{req}</td>
+                        <td style={{padding:'6px 12px',textAlign:'center',fontWeight:600}}>{iws}</td>
+                        <td style={{padding:'6px 12px',textAlign:'center'}}><span style={{fontSize:11,fontWeight:600,background:bg,color,borderRadius:10,padding:'2px 10px'}}>{status}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{marginTop:14,background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:6,padding:'10px 14px',fontSize:11,color:'#475569',lineHeight:1.7}}>
+                  Labour dispute claims may be filed within 2 years of termination (Federal Decree-Law No. 9 of 2024, effective August 2024).<br/>
+                  All IWS records are retained for 5 years — well within this window.<br/>
+                  <em>Note: Items marked Supabase will have file storage active after database migration.</em>
+                </div>
+              </div>
+            </div>)
+          })() : tab !== 'timesheet_review' ? (
           <div className="table-wrap"><table>
             <thead><tr><th>Worker</th><th>Type</th><th>Payment</th><th>Normal pay</th><th>OT pay</th><th>Allowances</th><th>Deductions</th><th>Net pay</th><th>C3</th></tr></thead>
             <tbody>
@@ -251,7 +481,7 @@ export default function PayrollPage() {
           </table></div>
           ) : (() => {
             // TIMESHEET REVIEW TAB
-            const allWorkers = getWorkers()
+            const allWorkers = getVisibleWorkers()
             const ramadan = getRamadanMode()
             const selHeader = tsHeaders.find(h => h.id === selectedTsHeader)
             const tsLines = selHeader ? getTimesheetLines(selHeader.id) : []
@@ -443,6 +673,42 @@ export default function PayrollPage() {
                 ))}
               </div>
             )}
+            <div style={{marginTop:16,paddingTop:12,borderTop:'1px solid var(--border)'}}>
+              <button className="btn btn-teal btn-sm" style={{width:'100%'}} onClick={() => {
+                const worker = getWorker(selected.worker_id) || getVisibleWorkers().find(w => w.id === selected.worker_id)
+                if (!worker) return
+                const leaveBalance = calculateLeaveBalance(worker.id)
+                const allPL = getPayrollLines()
+                const yearLines = allPL.filter(l => l.worker_id === worker.id && l.batch_id?.includes(`-${batch.year || '2026'}-`))
+                const ytd = {
+                  grossYtd: yearLines.reduce((s,l) => s + (l.gross_pay||0), 0),
+                  deductionsYtd: yearLines.reduce((s,l) => s + (l.deductions_total||0) + (l.advances_total||0), 0),
+                  netYtd: yearLines.reduce((s,l) => s + (l.net_pay||0), 0)
+                }
+                const isFlat = worker.category === 'Contract Worker' || worker.category === 'Subcontract Worker'
+                const allowanceLines = []
+                if (!isFlat) {
+                  if (worker.housing_allowance > 0) allowanceLines.push({ label: 'Housing Allowance', amount: worker.housing_allowance })
+                  if (worker.transport_allowance > 0) allowanceLines.push({ label: 'Transport Allowance', amount: worker.transport_allowance })
+                  if (worker.food_allowance > 0) allowanceLines.push({ label: 'Food / Meal Allowance', amount: worker.food_allowance })
+                  if (worker.other_allowance > 0) allowanceLines.push({ label: 'Other Allowance', amount: worker.other_allowance })
+                }
+                const deductionLines = []
+                if (selected.deductions_total > 0) deductionLines.push({ label: 'Deductions', amount: selected.deductions_total })
+                if (selected.advances_total > 0) deductionLines.push({ label: 'Advance Recovery', amount: selected.advances_total })
+                const workerPenalties = penalties.filter(p => p.worker_id === worker.id && p.status === 'confirmed')
+                workerPenalties.forEach(p => deductionLines.push({ label: 'Disciplinary Penalty', amount: p.amount }))
+                if (worker.iloe_monthly_deduction > 0) deductionLines.push({ label: 'ILOE Insurance', amount: worker.iloe_monthly_deduction })
+
+                const html = payslipHTML(worker, selected, batch, {
+                  leaveBalance, ytd,
+                  ramadanActive: getRamadanMode()?.active,
+                  allowanceLines, deductionLines
+                })
+                const ref = `IT-PS-${batch.month_label?.replace(/\s+/g,'-') || batch.month}-${worker.worker_number}`
+                setPayslipViewer({ html, ref })
+              }}>Generate Payslip</button>
+            </div>
           </div>
         )}
       </div>
@@ -453,78 +719,381 @@ export default function PayrollPage() {
         </div>
       )}
 
-      {/* Payroll Verification Panel */}
-      {lines.length > 0 && (
-        <div className="panel" style={{marginTop:16}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <button className="btn btn-ghost" onClick={() => setShowVerification(!showVerification)} style={{fontSize:13,fontWeight:600}}>
-              🔍 {showVerification ? 'Hide' : 'Show'} Verification Breakdown
-            </button>
-            {showVerification && <div style={{fontSize:10,color:'var(--hint)',fontStyle:'italic'}}>Rule: salary ÷ 30 ÷ 8 = base rate. Weekday OT ×1.25, Holiday OT ×1.50</div>}
-          </div>
-          {showVerification && (() => {
-            const allW = getWorkers()
-            const verRows = lines.map(l => {
-              const worker = allW.find(w => w.id === l.worker_id)
-              const isFlat = worker && (worker.category === 'Contract Worker' || worker.category === 'Subcontract Worker')
-              const basic = worker?.monthly_salary || 0
-              const rate = isFlat ? (worker?.hourly_rate||0) : basic / 30 / 8
-              const otPay = isFlat ? 0 : Math.round((l.ot_hours||0) * rate * 1.25 * 100) / 100
-              const holPay = Math.round((l.holiday_hours||0) * rate * 1.50 * 100) / 100
-              const allowances = (l.allowances_total||0)
-              const deductions = (l.deductions_total||0) + (l.advances_total||0)
-              const expectedNet = Math.round((basic + allowances + otPay + holPay - deductions) * 100) / 100
-              const actualNet = l.net_pay || 0
-              const diff = Math.round((actualNet - expectedNet) * 100) / 100
-              const match = Math.abs(diff) < 1
-              return { l, worker, isFlat, basic, rate:Math.round(rate*100)/100, otPay, holPay, allowances, deductions, expectedNet, actualNet, diff, match }
+      {/* Monthly Timesheet & Payroll Review */}
+      {lines.length > 0 && (() => {
+        const allW = getVisibleWorkers().filter(w => w.category !== 'Office Staff' && w.active !== false)
+        const ramadan = getRamadanMode()
+        const otThreshold = ramadan?.active ? 6 : 8
+        // Determine month from batch
+        const batchMonth = batch.month || '2026-04'
+        const [bYear, bMonth] = batchMonth.split('-').map(Number)
+        const daysInMonth = new Date(bYear, bMonth, 0).getDate()
+        const dayNums = Array.from({length:daysInMonth},(_,i)=>i+1)
+        const monthStr = batchMonth
+        const monthLabel = new Date(bYear, bMonth-1, 1).toLocaleDateString('en-GB',{month:'long',year:'numeric'})
+
+        // Get all timesheet lines for this month
+        const allTsLines = getAllTimesheetLines().filter(l => l.work_date && l.work_date.startsWith(monthStr))
+        const allHeaders = getTimesheetHeaders()
+
+        // Distinct clients
+        const clientSet = new Set()
+        allHeaders.forEach(h => { if (h.client_name) clientSet.add(h.client_name) })
+        const clients = [...clientSet].sort()
+
+        // Client header IDs (non-internal)
+        const internalClients = ['Innovation Technologies']
+        const clientHeaderIds = new Set(allHeaders.filter(h => !internalClients.includes(h.client_name)).map(h => h.id))
+        const iwsHeaderIds = new Set(allHeaders.filter(h => internalClients.includes(h.client_name)).map(h => h.id))
+
+        // Filter lines by selected client
+        const filteredClientHeaderIds = gridClient === 'all'
+          ? clientHeaderIds
+          : new Set(allHeaders.filter(h => h.client_name === gridClient).map(h => h.id))
+
+        // Build per-worker day data
+        const workerMap = {}
+        allW.forEach(w => {
+          workerMap[w.id] = { worker: w, clientDays: {}, iwsDays: {}, iwsLinesByDay: {} }
+        })
+        allTsLines.forEach(l => {
+          if (!workerMap[l.worker_id]) return
+          const day = parseInt(l.work_date.split('-')[2])
+          if (clientHeaderIds.has(l.header_id)) {
+            if (filteredClientHeaderIds.has(l.header_id)) {
+              workerMap[l.worker_id].clientDays[day] = (workerMap[l.worker_id].clientDays[day]||0) + l.total_hours
+            }
+          } else {
+            workerMap[l.worker_id].iwsDays[day] = (workerMap[l.worker_id].iwsDays[day]||0) + l.total_hours
+            if (!workerMap[l.worker_id].iwsLinesByDay[day]) workerMap[l.worker_id].iwsLinesByDay[day] = []
+            workerMap[l.worker_id].iwsLinesByDay[day].push(l)
+          }
+        })
+        // Also count non-internal lines as IWS if no internal source exists (IWS hours = all lines for that worker)
+        // In practice: IWS hours are the "truth" from all sources combined
+        allTsLines.forEach(l => {
+          if (!workerMap[l.worker_id]) return
+          const day = parseInt(l.work_date.split('-')[2])
+          // Aggregate all lines as IWS hours (total for that worker/day)
+          if (!workerMap[l.worker_id].iwsDays[day]) {
+            workerMap[l.worker_id].iwsDays[day] = l.total_hours
+            if (!workerMap[l.worker_id].iwsLinesByDay[day]) workerMap[l.worker_id].iwsLinesByDay[day] = []
+            workerMap[l.worker_id].iwsLinesByDay[day].push(l)
+          }
+        })
+
+        // Compute totals per worker
+        const workerRows = Object.values(workerMap).filter(wr => {
+          // Only show workers that have at least one timesheet line or are on payroll
+          const hasTs = Object.keys(wr.iwsDays).length > 0 || Object.keys(wr.clientDays).length > 0
+          const onPayroll = lines.some(l => l.worker_id === wr.worker.id)
+          return hasTs || onPayroll
+        }).map(wr => {
+          const w = wr.worker
+          const isFlat = w.category === 'Contract Worker' || w.category === 'Subcontract Worker'
+          const baseRate = isFlat ? (w.hourly_rate||0) : (w.monthly_salary||0) / 30 / 8
+          let totalHrs=0, normalHrs=0, ot1Hrs=0, ot2Hrs=0
+          dayNums.forEach(d => {
+            const hrs = wr.iwsDays[d] || 0
+            if (hrs <= 0) return
+            totalHrs += hrs
+            const dateStr = monthStr+'-'+String(d).padStart(2,'0')
+            const isFriday = new Date(dateStr).getDay() === 5
+            const isHol = isPublicHoliday(dateStr) || isFriday
+            if (isHol) { ot2Hrs += hrs }
+            else { normalHrs += Math.min(hrs, otThreshold); ot1Hrs += Math.max(0, hrs - otThreshold) }
+          })
+          const ot1Pay = isFlat ? 0 : Math.round(ot1Hrs * baseRate * 1.25 * 100)/100
+          const ot2Pay = isFlat ? Math.round(ot2Hrs * (w.hourly_rate||0) * 1.5 * 100)/100 : Math.round(ot2Hrs * baseRate * 1.5 * 100)/100
+          const allowances = (w.housing_allowance||0)+(w.transport_allowance||0)+(w.food_allowance||0)+(w.fixed_allowance||0)
+          const pl = lines.find(l => l.worker_id === w.id)
+          const deductions = pl ? (pl.deductions_total||0)+(pl.advances_total||0) : 0
+          const basicSalary = isFlat ? Math.round(totalHrs * (w.hourly_rate||0) * 100)/100 : (w.monthly_salary||0)
+          const grossPay = isFlat ? basicSalary + ot2Pay + allowances : basicSalary + ot1Pay + ot2Pay + allowances
+          const netPay = Math.round((grossPay - deductions) * 100)/100
+          // Conflicts
+          const conflicts = {}
+          dayNums.forEach(d => {
+            const clientH = wr.clientDays[d]
+            const iwsH = wr.iwsDays[d]
+            if (clientH !== undefined && iwsH !== undefined && Math.abs(clientH - iwsH) >= 0.5) {
+              conflicts[d] = { client: clientH, iws: iwsH, diff: Math.round((clientH - iwsH)*10)/10 }
+            }
+          })
+          return { ...wr, isFlat, baseRate: Math.round(baseRate*100)/100, totalHrs: Math.round(totalHrs*100)/100, normalHrs: Math.round(normalHrs*100)/100, ot1Hrs: Math.round(ot1Hrs*100)/100, ot2Hrs: Math.round(ot2Hrs*100)/100, ot1Pay, ot2Pay, allowances, deductions, basicSalary, grossPay: Math.round(grossPay*100)/100, netPay, conflicts, hasConflicts: Object.keys(conflicts).length > 0 }
+        })
+
+        // Day totals
+        const dayTotals = {}
+        dayNums.forEach(d => { dayTotals[d] = workerRows.reduce((s,wr) => s + (wr.iwsDays[d]||0), 0) })
+        const grandTotalHrs = workerRows.reduce((s,r)=>s+r.totalHrs,0)
+        const grandNormal = workerRows.reduce((s,r)=>s+r.normalHrs,0)
+        const grandOt1 = workerRows.reduce((s,r)=>s+r.ot1Hrs,0)
+        const grandOt2 = workerRows.reduce((s,r)=>s+r.ot2Hrs,0)
+        const grandGross = workerRows.reduce((s,r)=>s+r.grossPay,0)
+
+        const handleResolveConflict = (workerId, day, useClient) => {
+          const wr = workerRows.find(r => r.worker.id === workerId)
+          if (!wr) return
+          const targetHrs = useClient ? wr.clientDays[day] : wr.iwsDays[day]
+          const tsLines = wr.iwsLinesByDay[day] || []
+          if (tsLines.length > 0) {
+            const line = tsLines[0]
+            const diff = targetHrs - line.total_hours
+            updateTimesheetLine(line.id, {
+              total_hours: targetHrs,
+              normal_hours: Math.min(targetHrs, otThreshold),
+              ot_hours: Math.max(0, targetHrs - otThreshold)
             })
-            const totalGross = verRows.reduce((s,r) => s + r.basic + r.allowances + r.otPay + r.holPay, 0)
-            const totalDeductions = verRows.reduce((s,r) => s + r.deductions, 0)
-            const totalNet = verRows.reduce((s,r) => s + r.expectedNet, 0)
-            const mismatchCount = verRows.filter(r => !r.match).length
-            return (<div style={{marginTop:12}}>
-              <div className="table-wrap"><table>
-                <thead><tr><th>Worker</th><th>Basic</th><th>÷30÷8 Rate</th><th>Normal Hrs</th><th>OT Hrs (×1.25)</th><th>Holiday Hrs (×1.50)</th><th>OT Pay</th><th>Holiday Pay</th><th>Allowances</th><th>Deductions</th><th>Net Pay</th><th>Check</th></tr></thead>
-                <tbody>
-                  {verRows.map((r, i) => (
-                    <tr key={i} style={{background:r.match?'':'#fef2f2'}}>
-                      <td style={{fontWeight:500,fontSize:12}}>{r.l.worker_name}<div style={{fontSize:10,color:'var(--hint)'}}>{r.l.worker_number}</div></td>
-                      <td style={{fontSize:11}}>{formatCurrency(r.basic)}</td>
-                      <td style={{fontSize:11,fontFamily:'monospace'}}>{r.rate}</td>
-                      <td style={{fontSize:11}}>{r.l.normal_hours||0}h</td>
-                      <td style={{fontSize:11,color:r.l.ot_hours>0?'var(--warning)':'var(--hint)'}}>{r.l.ot_hours||0}h</td>
-                      <td style={{fontSize:11,color:r.l.holiday_hours>0?'var(--danger)':'var(--hint)'}}>{r.l.holiday_hours||0}h</td>
-                      <td style={{fontSize:11,color:'var(--success)'}}>{r.otPay>0?formatCurrency(r.otPay):'—'}</td>
-                      <td style={{fontSize:11,color:'var(--danger)'}}>{r.holPay>0?formatCurrency(r.holPay):'—'}</td>
-                      <td style={{fontSize:11}}>{formatCurrency(r.allowances)}</td>
-                      <td style={{fontSize:11,color:'var(--danger)'}}>{r.deductions>0?formatCurrency(r.deductions):'—'}</td>
-                      <td style={{fontSize:12,fontWeight:600,color:'var(--teal)'}}>{formatCurrency(r.expectedNet)}</td>
-                      <td style={{textAlign:'center'}}>
-                        {r.match
-                          ? <span style={{color:'var(--success)',fontWeight:700}}>✓</span>
-                          : <span style={{color:'var(--danger)',fontWeight:700}}>✗ <span style={{fontSize:10}}>{r.diff>0?'+':''}{formatCurrency(r.diff)}</span></span>}
+          }
+          setConflictPopover(null)
+          setGridKey(k => k+1)
+        }
+
+        const totalConflicts = workerRows.reduce((s,r) => s + Object.keys(r.conflicts).length, 0)
+
+        const printTimesheetGrid = () => {
+          const printArea = document.getElementById('timesheet-print-area')
+          if (!printArea) return
+          document.body.style.overflow = 'hidden'
+          document.body.classList.add('printing-timesheet')
+          window.print()
+          setTimeout(() => { document.body.classList.remove('printing-timesheet'); document.body.style.overflow = '' }, 1000)
+        }
+
+        return (
+        <div className="panel" style={{marginTop:16}} id="timesheet-grid-section">
+          {/* Print styles */}
+          <style dangerouslySetInnerHTML={{__html:`
+            @media print {
+              @page { size: A3 landscape; margin: 10mm; }
+              body.printing-timesheet * { visibility: hidden; }
+              body.printing-timesheet #timesheet-print-area, body.printing-timesheet #timesheet-print-area * { visibility: visible; }
+              body.printing-timesheet #timesheet-print-area { position: fixed; top: 0; left: 0; width: 100%; font-size: 8pt; background: white; }
+              body.printing-timesheet th, body.printing-timesheet td { position: static !important; border: 0.5pt solid #ccc; padding: 2px 3px; white-space: nowrap; }
+              body.printing-timesheet table { width: 100%; border-collapse: collapse; font-size: 7pt; }
+              body.printing-timesheet #timesheet-print-area::before { content: "Innovation Technologies LLC O.P.C. — Monthly Timesheet"; display: block; font-size: 11pt; font-weight: bold; margin-bottom: 4mm; visibility: visible; }
+              body.printing-timesheet #timesheet-print-area::after { content: "Licence: CN-5087790 | MOHRE: 1979124 | CONFIDENTIAL"; display: block; font-size: 7pt; color: #666; margin-top: 4mm; visibility: visible; }
+            }
+          `}} />
+          <div className="panel-header">
+            <div><h2>Monthly Timesheet & Payroll Review</h2><p>{monthLabel}</p></div>
+          </div>
+
+          {/* Toggle + Filters */}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:10}}>
+            <div style={{display:'flex',gap:4,background:'var(--surface)',borderRadius:8,padding:3,border:'1px solid var(--border)'}}>
+              <button className={`btn btn-sm ${gridViewMode==='daily'?'btn-teal':'btn-ghost'}`} onClick={()=>setGridViewMode('daily')}>Daily Grid View</button>
+              <button className={`btn btn-sm ${gridViewMode==='summary'?'btn-teal':'btn-ghost'}`} onClick={()=>setGridViewMode('summary')}>Payroll Summary View</button>
+            </div>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              {gridViewMode === 'daily' && (
+                <>
+                  <select className="filter-select" value={gridClient} onChange={e=>setGridClient(e.target.value)} style={{fontSize:12,minWidth:180}}>
+                    <option value="all">All Clients</option>
+                    {clients.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <button className="btn btn-sm btn-secondary" onClick={printTimesheetGrid}>Print Timesheet</button>
+                </>
+              )}
+              <span style={{fontSize:10,color:'var(--hint)',fontStyle:'italic'}}>Export (future)</span>
+            </div>
+          </div>
+
+          {gridViewMode === 'daily' ? (
+          /* ═══ DAILY GRID VIEW ═══ */
+          workerRows.length === 0 ?
+            <div style={{padding:'24px 0',textAlign:'center',color:'var(--hint)',fontSize:13}}>No timesheet lines found for this period. Upload a timesheet first.</div>
+          :
+          <div key={gridKey} id="timesheet-print-area" data-generated={new Date().toLocaleDateString('en-GB')} style={{overflowX:'auto',position:'relative'}}>
+            <table style={{width:'max-content',minWidth:'100%',borderCollapse:'collapse',fontSize:11}}>
+              <thead>
+                <tr style={{background:'var(--surface)'}}>
+                  <th style={{padding:'6px 8px',textAlign:'left',position:'sticky',left:0,background:'var(--surface)',zIndex:3,minWidth:160,borderRight:'2px solid var(--border)',fontSize:10,fontWeight:700}}>WORKER</th>
+                  <th style={{padding:'6px 8px',textAlign:'left',position:'sticky',left:160,background:'var(--surface)',zIndex:3,minWidth:120,borderRight:'2px solid var(--border)',fontSize:10,fontWeight:600}}>TRADE</th>
+                  {dayNums.map(d => {
+                    const dateStr = monthStr+'-'+String(d).padStart(2,'0')
+                    const dt = new Date(dateStr)
+                    const dayAbbr = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getDay()]
+                    const isFri = dt.getDay() === 5
+                    const isHol = isPublicHoliday(dateStr)
+                    const bg = isHol ? '#fee2e2' : isFri ? '#fef3c7' : 'var(--surface)'
+                    return <th key={d} style={{padding:'4px 2px',textAlign:'center',minWidth:38,fontSize:9,fontWeight:500,color:isHol?'#dc2626':isFri?'#92400e':'var(--muted)',background:bg}}>
+                      <div>{d}</div><div>{isFri?'F':dayAbbr.slice(0,2)}</div>
+                    </th>
+                  })}
+                  <th style={{padding:'6px 4px',textAlign:'center',borderLeft:'2px solid var(--border)',fontSize:10,fontWeight:700,background:'#eff6ff',minWidth:50}}>TOTAL</th>
+                  <th style={{padding:'6px 4px',textAlign:'center',fontSize:10,minWidth:44}}>NORM</th>
+                  <th style={{padding:'6px 4px',textAlign:'center',fontSize:10,minWidth:44,color:'#d97706'}}>OT1 1.25</th>
+                  <th style={{padding:'6px 4px',textAlign:'center',fontSize:10,minWidth:48,color:'#dc2626'}}>OT2 1.50</th>
+                  <th style={{padding:'6px 4px',textAlign:'center',fontSize:10,fontWeight:700,minWidth:75,background:'#eff6ff',color:'var(--teal)'}}>GROSS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workerRows.map((wr, ri) => {
+                  const hasClientData = Object.keys(wr.clientDays).length > 0
+                  return (<React.Fragment key={'wr-'+wr.worker.id}>
+                    {/* ROW A — Client Hours */}
+                    {hasClientData && (
+                    <tr style={{background:'#eff6ff',borderTop:'2px solid #e2e8f0'}}>
+                      <td style={{padding:'5px 8px',position:'sticky',left:0,background:'#eff6ff',zIndex:2,borderRight:'2px solid var(--border)'}}>
+                        <div style={{fontWeight:600,fontSize:11}}>{wr.worker.full_name}</div>
+                        <div style={{fontSize:9,color:'var(--hint)'}}>{wr.worker.worker_number}</div>
+                        <span style={{fontSize:9,fontWeight:600,background:'#dbeafe',color:'#1e40af',borderRadius:4,padding:'1px 5px',marginTop:2,display:'inline-block'}}>Client</span>
                       </td>
+                      <td style={{padding:'5px 8px',position:'sticky',left:160,background:'#eff6ff',zIndex:2,borderRight:'2px solid var(--border)',fontSize:10,color:'var(--muted)'}}>{wr.worker.trade_role}</td>
+                      {dayNums.map(d => {
+                        const hrs = wr.clientDays[d]
+                        return <td key={d} style={{padding:'3px 1px',textAlign:'center',fontSize:11,color:hrs?'#1e40af':'#cbd5e1',fontFamily:'monospace',fontWeight:hrs?500:400}}>{hrs !== undefined ? hrs : '—'}</td>
+                      })}
+                      <td style={{padding:'6px 4px',textAlign:'center',borderLeft:'2px solid var(--border)',fontWeight:600,fontSize:11,background:'#eff6ff',color:'#1e40af'}}>{Object.values(wr.clientDays).reduce((s,v)=>s+v,0)}</td>
+                      <td colSpan={4}></td>
+                    </tr>)}
+
+                    {/* ROW B — IWS Hours */}
+                    <tr style={{background:'#fff',borderTop:hasClientData?'none':'2px solid #e2e8f0'}}>
+                      <td style={{padding:'5px 8px',position:'sticky',left:0,background:'#fff',zIndex:2,borderRight:'2px solid var(--border)'}}>
+                        {!hasClientData && <>
+                          <div style={{fontWeight:600,fontSize:11}}>{wr.worker.full_name}</div>
+                          <div style={{fontSize:9,color:'var(--hint)'}}>{wr.worker.worker_number}</div>
+                        </>}
+                        <span style={{fontSize:9,fontWeight:600,background:'#f1f5f9',color:'#64748b',borderRadius:4,padding:'1px 5px',display:'inline-block',marginTop:hasClientData?0:2}}>IWS</span>
+                      </td>
+                      <td style={{padding:'5px 8px',position:'sticky',left:160,background:'#fff',zIndex:2,borderRight:'2px solid var(--border)',fontSize:10,color:'var(--muted)'}}>{!hasClientData ? wr.worker.trade_role : ''}</td>
+                      {dayNums.map(d => {
+                        const hrs = wr.iwsDays[d] || 0
+                        const dateStr = monthStr+'-'+String(d).padStart(2,'0')
+                        const isFri = new Date(dateStr).getDay() === 5
+                        const isHol = isPublicHoliday(dateStr) || isFri
+                        const bg = hrs <= 0 ? '#fafbfc' : isHol ? '#fef2f2' : hrs > 8 ? '#fffbeb' : '#fff'
+                        const color = hrs <= 0 ? '#cbd5e1' : isHol ? '#dc2626' : hrs > 8 ? '#92400e' : '#166534'
+                        return <td key={d} style={{padding:'3px 1px',textAlign:'center',background:bg,fontSize:11,fontWeight:hrs>8?700:hrs>0?500:400,color,fontFamily:'monospace'}}>{hrs>0?hrs:'—'}</td>
+                      })}
+                      <td style={{padding:'6px 4px',textAlign:'center',borderLeft:'2px solid var(--border)',fontWeight:700,fontSize:12,background:'#eff6ff',color:'var(--teal)'}}>{wr.totalHrs}</td>
+                      <td style={{padding:'4px',textAlign:'center',fontSize:11}}>{wr.normalHrs}</td>
+                      <td style={{padding:'4px',textAlign:'center',fontSize:11,color:wr.ot1Hrs>0?'#d97706':'var(--hint)',fontWeight:wr.ot1Hrs>0?600:400}}>{wr.ot1Hrs}</td>
+                      <td style={{padding:'4px',textAlign:'center',fontSize:11,color:wr.ot2Hrs>0?'#dc2626':'var(--hint)',fontWeight:wr.ot2Hrs>0?600:400}}>{wr.ot2Hrs}</td>
+                      <td style={{padding:'6px 4px',textAlign:'center',fontWeight:700,fontSize:12,background:'#eff6ff',color:'var(--teal)'}}>{formatCurrency(wr.grossPay)}</td>
                     </tr>
-                  ))}
-                </tbody>
-              </table></div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginTop:12}}>
-                <div className="stat-card"><div className="num teal" style={{fontSize:16}}>{formatCurrency(totalGross)}</div><div className="lbl">Total gross</div></div>
-                <div className="stat-card"><div className="num danger" style={{fontSize:16}}>{formatCurrency(totalDeductions)}</div><div className="lbl">Total deductions</div></div>
-                <div className="stat-card"><div className="num success" style={{fontSize:16}}>{formatCurrency(totalNet)}</div><div className="lbl">Total net (calculated)</div></div>
-                <div className="stat-card"><div className={`num ${mismatchCount>0?'danger':'success'}`} style={{fontSize:16}}>{mismatchCount === 0 ? '✓ All match' : mismatchCount + ' mismatch'+(mismatchCount>1?'es':'')}</div><div className="lbl">Verification status</div></div>
-              </div>
-            </div>)
-          })()}
-        </div>
-      )}
+
+                    {/* ROW C — Conflict Row */}
+                    {wr.hasConflicts && (
+                    <tr style={{background:'#fff'}}>
+                      <td style={{padding:'3px 8px',position:'sticky',left:0,background:'#fff',zIndex:2,borderRight:'2px solid var(--border)'}}>
+                        <span style={{fontSize:10,fontWeight:700,color:'#dc2626'}}>&#9888;</span>
+                      </td>
+                      <td style={{position:'sticky',left:160,background:'#fff',zIndex:2,borderRight:'2px solid var(--border)'}}></td>
+                      {dayNums.map(d => {
+                        const c = wr.conflicts[d]
+                        if (!c) return <td key={d} style={{padding:'3px 1px'}}></td>
+                        const isActive = conflictPopover?.workerId === wr.worker.id && conflictPopover?.day === d
+                        return <td key={d} style={{padding:'2px 1px',textAlign:'center',position:'relative'}}>
+                          <div onClick={() => setConflictPopover(isActive ? null : {workerId:wr.worker.id,day:d})} style={{background:'#fee2e2',color:'#dc2626',borderRadius:4,padding:'1px 2px',fontSize:10,fontWeight:700,cursor:'pointer'}}>{c.diff > 0 ? '+' : ''}{c.diff}</div>
+                          {isActive && (
+                            <div style={{position:'absolute',top:'100%',left:'50%',transform:'translateX(-50%)',zIndex:10,background:'#fff',border:'1px solid #e2e8f0',borderRadius:8,padding:10,boxShadow:'0 4px 16px rgba(0,0,0,0.12)',width:200,textAlign:'left'}} onClick={e=>e.stopPropagation()}>
+                              <div style={{fontSize:10,marginBottom:6}}>
+                                <div>Client says: <strong>{c.client}h</strong></div>
+                                <div>IWS says: <strong>{c.iws}h</strong></div>
+                                <div style={{color:'#dc2626',fontWeight:600}}>Difference: {c.diff > 0 ? '+' : ''}{c.diff}h</div>
+                              </div>
+                              <div style={{display:'flex',gap:4}}>
+                                <button className="btn btn-sm" style={{flex:1,fontSize:9,background:'#dbeafe',color:'#1e40af',border:'none',padding:'4px 6px'}} onClick={()=>handleResolveConflict(wr.worker.id,d,true)}>Use Client</button>
+                                <button className="btn btn-sm" style={{flex:1,fontSize:9,background:'#f1f5f9',color:'#334155',border:'none',padding:'4px 6px'}} onClick={()=>handleResolveConflict(wr.worker.id,d,false)}>Use IWS</button>
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                      })}
+                      <td colSpan={5}></td>
+                    </tr>)}
+                  </React.Fragment>)
+                })}
+
+                {/* TOTALS ROW */}
+                <tr style={{background:'#0d9488',color:'#fff',fontWeight:700,position:'sticky',bottom:0,zIndex:3}}>
+                  <td style={{padding:'8px',position:'sticky',left:0,background:'#0d9488',zIndex:4,borderRight:'2px solid #0f766e',fontSize:11}}>TOTALS</td>
+                  <td style={{padding:'8px',position:'sticky',left:160,background:'#0d9488',zIndex:4,borderRight:'2px solid #0f766e'}}></td>
+                  {dayNums.map(d => <td key={d} style={{padding:'4px 1px',textAlign:'center',fontSize:10,fontFamily:'monospace'}}>{dayTotals[d]>0?Math.round(dayTotals[d]*10)/10:'—'}</td>)}
+                  <td style={{padding:'6px 4px',textAlign:'center',borderLeft:'2px solid #0f766e',fontSize:12}}>{Math.round(grandTotalHrs*10)/10}</td>
+                  <td style={{padding:'4px',textAlign:'center',fontSize:11}}>{Math.round(grandNormal*10)/10}</td>
+                  <td style={{padding:'4px',textAlign:'center',fontSize:11}}>{Math.round(grandOt1*10)/10}</td>
+                  <td style={{padding:'4px',textAlign:'center',fontSize:11}}>{Math.round(grandOt2*10)/10}</td>
+                  <td style={{padding:'6px 4px',textAlign:'center',fontSize:12}}>{formatCurrency(grandGross)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          ) : (
+          /* ═══ PAYROLL SUMMARY VIEW ═══ */
+          <div>
+          {/* Conflict alert banner */}
+          {totalConflicts > 0 ? (
+            <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:'10px 16px',marginBottom:14,fontSize:12,color:'#dc2626',fontWeight:600}}>
+              &#9888; {totalConflicts} unresolved timesheet conflict{totalConflicts!==1?'s':''} — resolve in Daily Grid View before approving payroll
+            </div>
+          ) : (
+            <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:8,padding:'10px 16px',marginBottom:14,fontSize:12,color:'#16a34a',fontWeight:600}}>
+              &#10003; All timesheet hours reconciled — ready for payroll approval
+            </div>
+          )}
+          {workerRows.length === 0 ? (
+            <div style={{padding:'24px 0',textAlign:'center',color:'var(--hint)',fontSize:13}}>No timesheet lines found for this period. Upload a timesheet first.</div>
+          ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr>
+                <th>Worker</th><th>Trade</th><th>Category</th>
+                <th>Total Hrs</th><th>Normal Hrs</th><th style={{color:'#d97706'}}>OT1 Hrs</th><th style={{color:'#dc2626'}}>OT2/Hol Hrs</th>
+                <th>Basic Salary</th><th style={{color:'#d97706'}}>OT1 Pay</th><th style={{color:'#dc2626'}}>OT2 Pay</th>
+                <th>Allowances</th><th>Deductions</th><th style={{color:'var(--teal)'}}>NET PAY</th>
+              </tr></thead>
+              <tbody>
+                {workerRows.map((wr, i) => (
+                  <tr key={i}>
+                    <td style={{fontWeight:500,fontSize:12}}>{wr.worker.full_name}<div style={{fontSize:10,color:'var(--hint)'}}>{wr.worker.worker_number}</div></td>
+                    <td style={{fontSize:11}}>{wr.worker.trade_role}</td>
+                    <td><StatusBadge label={wr.worker.category} tone="neutral" /></td>
+                    <td style={{fontSize:12,fontWeight:600}}>{wr.totalHrs}h</td>
+                    <td style={{fontSize:11}}>{wr.normalHrs}h</td>
+                    <td style={{fontSize:11,color:wr.ot1Hrs>0?'#d97706':'var(--hint)',fontWeight:wr.ot1Hrs>0?600:400}}>{wr.ot1Hrs}h</td>
+                    <td style={{fontSize:11,color:wr.ot2Hrs>0?'#dc2626':'var(--hint)',fontWeight:wr.ot2Hrs>0?600:400}}>{wr.ot2Hrs}h</td>
+                    <td style={{fontSize:11}}>{formatCurrency(wr.basicSalary)}</td>
+                    <td style={{fontSize:11,color:wr.ot1Pay>0?'#d97706':'var(--hint)'}}>{wr.ot1Pay>0?formatCurrency(wr.ot1Pay):'—'}</td>
+                    <td style={{fontSize:11,color:wr.ot2Pay>0?'#dc2626':'var(--hint)'}}>{wr.ot2Pay>0?formatCurrency(wr.ot2Pay):'—'}</td>
+                    <td style={{fontSize:11,color:'var(--success)'}}>{formatCurrency(wr.allowances)}</td>
+                    <td style={{fontSize:11,color:wr.deductions>0?'var(--danger)':'var(--hint)'}}>{wr.deductions>0?formatCurrency(wr.deductions):'—'}</td>
+                    <td style={{fontSize:13,fontWeight:700,color:'var(--teal)'}}>{formatCurrency(wr.netPay)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{background:'var(--surface)',fontWeight:700}}>
+                  <td colSpan={3} style={{fontSize:12}}>TOTALS</td>
+                  <td style={{fontSize:12}}>{Math.round(grandTotalHrs*10)/10}h</td>
+                  <td style={{fontSize:11}}>{Math.round(grandNormal*10)/10}h</td>
+                  <td style={{fontSize:11,color:'#d97706'}}>{Math.round(grandOt1*10)/10}h</td>
+                  <td style={{fontSize:11,color:'#dc2626'}}>{Math.round(grandOt2*10)/10}h</td>
+                  <td style={{fontSize:11}}>{formatCurrency(workerRows.reduce((s,r)=>s+r.basicSalary,0))}</td>
+                  <td style={{fontSize:11,color:'#d97706'}}>{formatCurrency(workerRows.reduce((s,r)=>s+r.ot1Pay,0))}</td>
+                  <td style={{fontSize:11,color:'#dc2626'}}>{formatCurrency(workerRows.reduce((s,r)=>s+r.ot2Pay,0))}</td>
+                  <td style={{fontSize:11,color:'var(--success)'}}>{formatCurrency(workerRows.reduce((s,r)=>s+r.allowances,0))}</td>
+                  <td style={{fontSize:11,color:'var(--danger)'}}>{formatCurrency(workerRows.reduce((s,r)=>s+r.deductions,0))}</td>
+                  <td style={{fontSize:13,color:'var(--teal)'}}>{formatCurrency(workerRows.reduce((s,r)=>s+r.netPay,0))}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          )}
+          </div>
+          )}
+        </div>)
+      })()}
 
       {/* Unlock Modal */}
       {showUnlock && (
         <div className="drawer-backdrop" onClick={() => setShowUnlock(false)}>
           <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:12,padding:24,width:'min(420px,90vw)',margin:'auto',position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',boxShadow:'0 20px 60px rgba(0,0,0,0.15)'}}>
-            <h3 style={{fontSize:15,fontWeight:600,marginBottom:8}}>🔓 Unlock Payroll — Owner Authorization</h3>
+            <h3 style={{fontSize:15,fontWeight:600,marginBottom:8}}>🔓 Unlock Payroll — Management Authorization</h3>
             <div className="notice warning" style={{marginBottom:12,fontSize:12}}>Unlocking will reset all approvals. Operations and Owner must re-approve after modifications.</div>
             <label className="form-label">Reason for unlocking *</label>
             <textarea className="form-textarea" value={unlockReason} onChange={e => setUnlockReason(e.target.value)} placeholder="Explain why this payroll needs to be unlocked..." rows={4} />
@@ -552,5 +1121,7 @@ export default function PayrollPage() {
         </div>
       )}
     </AppShell>
+    {payslipViewer && <LetterViewer html={payslipViewer.html} refNumber={payslipViewer.ref} onClose={() => setPayslipViewer(null)} />}
+    </>
   )
 }

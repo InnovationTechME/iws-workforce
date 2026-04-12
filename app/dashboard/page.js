@@ -2,21 +2,59 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
-import { getDashboardMetrics, getInboxItems, getPendingApprovalsForRole, getWorkerDisplay, getAbsentToday, getAbsencePercentage } from '../../lib/mockStore'
+import { getDashboardMetrics, getInboxItems, getPendingApprovalsForRole, getWorkerDisplay, getAbsentToday, getAbsencePercentage, checkNonReturnStatus, getAllPayrollBatches } from '../../lib/mockStore'
+import { getAllWorkers } from '../../lib/workerService'
 import { formatDate } from '../../lib/utils'
 import { getRole } from '../../lib/mockAuth'
 
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState(null)
   const [inbox, setInbox] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const router = useRouter()
 
   useEffect(() => {
-    setMetrics(getDashboardMetrics())
-    setInbox(getInboxItems())
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setLoadError(null)
+      try {
+        // Base metrics/inbox from mockStore (tables not yet migrated)
+        const baseMetrics = getDashboardMetrics()
+        const baseInbox = getInboxItems()
+        // Worker counts come from Supabase
+        const allWorkers = await getAllWorkers()
+        const isActive = (w) => (w.status ? String(w.status).toLowerCase() === 'active' : w.active !== false)
+        const active = allWorkers.filter(isActive)
+        const byCategory = {
+          'Permanent Staff': active.filter(w => w.category === 'Permanent Staff').length,
+          'Contract Worker': active.filter(w => w.category === 'Contract Worker').length,
+          'Subcontractor':   active.filter(w => w.category === 'Subcontract Worker' || w.category === 'Subcontractor').length,
+          'Office Staff':    active.filter(w => w.category === 'Office Staff').length,
+        }
+        const mergedMetrics = {
+          ...baseMetrics,
+          activeWorkers: active.length,
+          siteWorkforce: active.filter(w => w.category !== 'Office Staff').length,
+          officeStaff:   active.filter(w => w.category === 'Office Staff').length,
+          subcontractors: active.filter(w => w.category === 'Subcontract Worker' || w.category === 'Subcontractor').length,
+          byCategory,
+        }
+        if (!cancelled) {
+          setMetrics(mergedMetrics)
+          setInbox(baseInbox)
+        }
+      } catch (err) {
+        if (!cancelled) setLoadError(err?.message || 'Failed to load dashboard')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
   }, [])
 
-  if (!metrics || !inbox) return null
+  if (loading || !metrics || !inbox) return null
 
   const now = new Date()
   const dayName = now.toLocaleDateString('en-GB',{weekday:'long'})
@@ -31,6 +69,7 @@ export default function DashboardPage() {
     { key:'expiringDocs', label:'Expiring Soon', value: inbox.expiringDocs?.length||0, sub:'within 30 days', tone:'warning', icon:'⏰', href:'/documents', priority:6 },
     { key:'expiringCerts', label:'Certs Expiring', value: inbox.expiringCerts?.length||0, sub:'within 30 days', tone:'warning', icon:'🔔', href:'/certifications', priority:7 },
     { key:'timesheets', label:'Pending Timesheets', value: inbox.pendingTimesheets?.length||0, sub:'awaiting approval', tone:'info', icon:'🕐', href:'/timesheets', priority:8 },
+    { key:'leaveNonReturn', label:'Leave Non-Return', value: checkNonReturnStatus().length, sub: checkNonReturnStatus().length > 0 ? checkNonReturnStatus()[0].worker_name + ' overdue' : 'all returned', tone: checkNonReturnStatus().length > 0 ? 'danger' : 'info', icon:'✈️', href:'/leave', priority: checkNonReturnStatus().length > 0 ? 0 : 9 },
   ].sort((a,b) => a.priority - b.priority)
 
   const toneStyles = {
@@ -55,14 +94,14 @@ export default function DashboardPage() {
 
       <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',gap:12,marginBottom:20}}>
         <div style={{background:'linear-gradient(135deg,#1d4ed8,#2563eb)',borderRadius:12,padding:'20px 24px',color:'white',cursor:'pointer'}} onClick={()=>router.push('/workers')}>
-          <div style={{fontSize:11,fontWeight:600,opacity:0.8,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:4}}>Today&apos;s Total Workforce</div>
-          <div style={{fontSize:48,fontWeight:800,lineHeight:1}}>{metrics.activeWorkers || 0}</div>
-          <div style={{fontSize:12,opacity:0.8,marginTop:6}}>Active workers on record</div>
+          <div style={{fontSize:11,fontWeight:600,opacity:0.8,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:4}}>Today&apos;s Site Workforce</div>
+          <div style={{fontSize:48,fontWeight:800,lineHeight:1}}>{metrics.siteWorkforce || 0}</div>
+          <div style={{fontSize:12,opacity:0.8,marginTop:6}}>Active site workers</div>
           <div style={{display:'flex',gap:16,marginTop:12,fontSize:11}}>
             <span style={{opacity:0.9}}>Direct: {metrics.byCategory?.['Permanent Staff']||0}</span>
             <span style={{opacity:0.9}}>Hourly: {metrics.byCategory?.['Contract Worker']||0}</span>
             <span style={{opacity:0.9}}>Sub: {metrics.byCategory?.['Subcontractor']||0}</span>
-            <span style={{opacity:0.9}}>Office: {metrics.byCategory?.['Office Staff']||0}</span>
+            <span style={{opacity:0.6}}>Office: {metrics.byCategory?.['Office Staff']||0} (excluded from total)</span>
           </div>
         </div>
 
@@ -88,6 +127,29 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Payroll Run Button */}
+      {(() => {
+        const batches = getAllPayrollBatches()
+        const activeBatch = batches.find(b => !b.locked)
+        if (!activeBatch) return null
+        const today = new Date()
+        const dayOfMonth = today.getDate()
+        const isOverdue = dayOfMonth > 17
+        const isUrgent = dayOfMonth >= 14
+        return (
+          <a href="/payroll-run" style={{textDecoration:'none'}}>
+            <div style={{background:isOverdue?'linear-gradient(135deg,#dc2626,#b91c1c)':isUrgent?'linear-gradient(135deg,#d97706,#b45309)':'linear-gradient(135deg,#0d9488,#0891b2)',borderRadius:12,padding:'20px 24px',marginBottom:20,cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',boxShadow:'0 4px 16px rgba(0,0,0,0.15)'}}>
+              <div>
+                <div style={{color:'rgba(255,255,255,0.8)',fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:1,marginBottom:6}}>{isOverdue?'OVERDUE':isUrgent?'ACTION REQUIRED':'PENDING'}</div>
+                <div style={{color:'white',fontSize:18,fontWeight:700}}>⚡ {activeBatch.month_label} Payroll</div>
+                <div style={{color:'rgba(255,255,255,0.75)',fontSize:12,marginTop:4}}>{isOverdue?'Payroll is overdue — approve immediately':isUrgent?`Payroll due in ${17-dayOfMonth} day${17-dayOfMonth===1?'':'s'}`:'Click to start payroll run wizard'}</div>
+              </div>
+              <div style={{color:'white',fontSize:32,background:'rgba(255,255,255,0.15)',borderRadius:'50%',width:56,height:56,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>→</div>
+            </div>
+          </a>
+        )
+      })()}
+
       {(() => {
         try {
           const role = getRole()
@@ -111,6 +173,26 @@ export default function DashboardPage() {
             </div>
           )
         } catch(e) { return null }
+      })()}
+
+      {(() => {
+        const today = new Date()
+        const dayOfMonth = today.getDate()
+        if (dayOfMonth < 10) return null
+        const dueDate = new Date(today.getFullYear(), today.getMonth(), 17)
+        const daysLeft = Math.ceil((dueDate - today) / (1000*60*60*24))
+        const dueDateLabel = dueDate.toLocaleDateString('en-GB',{day:'numeric',month:'short'})
+        const isOverdue = daysLeft < 0
+        const isUrgent = daysLeft >= 0 && daysLeft <= 2
+        const isWarning = daysLeft >= 3 && daysLeft <= 5
+        const bg = isOverdue ? '#fef2f2' : isUrgent ? '#fff7ed' : '#fffbeb'
+        const border = isOverdue ? '#fca5a5' : isUrgent ? '#fdba74' : '#fde68a'
+        const color = isOverdue ? '#dc2626' : isUrgent ? '#ea580c' : '#92400e'
+        return (
+          <div style={{background:bg,border:'1px solid '+border,borderRadius:8,padding:'10px 16px',marginBottom:16,fontSize:12,fontWeight:600,color,cursor:'pointer'}} onClick={() => router.push('/payroll')}>
+            {isOverdue ? '🚨 Payroll overdue — approve immediately' : isUrgent ? `🔴 Payroll approval due ${dueDateLabel} — approve today` : `⏱ Payroll due in ${daysLeft} days — start review`}
+          </div>
+        )
       })()}
 
       <div style={{marginBottom:8}}>

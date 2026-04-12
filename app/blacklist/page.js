@@ -3,19 +3,48 @@ import { useState, useEffect } from 'react'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import DrawerForm from '../../components/DrawerForm'
-import { getBlacklist, addToBlacklist, makeId } from '../../lib/mockStore'
+import { getBlacklist, addToBlacklist } from '../../lib/blacklistService'
 import { formatDate } from '../../lib/utils'
 
 export default function BlacklistPage() {
   const [entries, setEntries] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [showDrawer, setShowDrawer] = useState(false)
   const [form, setForm] = useState({ full_name:'', passport_number:'', nationality:'', reason:'', blacklisted_by:'' })
 
-  useEffect(() => { setEntries(getBlacklist()) }, [])
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setLoadError(null)
+      try {
+        const rows = await getBlacklist()
+        if (!cancelled) setEntries(rows)
+      } catch (err) {
+        if (!cancelled) setLoadError(err?.message || 'Failed to load blacklist')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
-  const handleAdd = () => {
-    addToBlacklist({ ...form, id: makeId('bl') })
-    setEntries(getBlacklist())
+  const handleAdd = async () => {
+    const payload = {
+      full_name: form.full_name,
+      passport_number: form.passport_number,
+      nationality: form.nationality,
+      reason: form.reason,
+      added_by: form.blacklisted_by || 'HR Admin'
+    }
+    try {
+      await addToBlacklist(payload)
+      const rows = await getBlacklist()
+      setEntries(rows)
+    } catch (err) {
+      setLoadError(err?.message || 'Failed to add entry')
+    }
     setShowDrawer(false)
   }
 

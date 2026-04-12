@@ -5,7 +5,7 @@ import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import TimesheetCalendar from '../../components/TimesheetCalendar'
 import DrawerForm from '../../components/DrawerForm'
-import { getTimesheetHeaders, getTimesheetLines, addTimesheetHeader, addTimesheetLine, updateTimesheetHeader, getWorkers, makeId, calculateHourlyPay, getWorker } from '../../lib/mockStore'
+import { getTimesheetHeaders, getTimesheetLines, addTimesheetHeader, addTimesheetLine, updateTimesheetHeader, getVisibleWorkers, makeId, calculateHourlyPay, getWorker } from '../../lib/mockStore'
 import { formatDate } from '../../lib/utils'
 import { parseClientTimesheet, validateTimesheetMonth } from '../../lib/excelParser'
 import { getActiveClients } from '../../data/mockClients'
@@ -35,7 +35,7 @@ export default function TimesheetsPage() {
   const [hForm, setHForm] = useState({ client_name:'', project_site:'', job_no:'', date:'' })
 
   useEffect(() => {
-    setHeaders(getTimesheetHeaders()); setWorkers(getWorkers())
+    setHeaders(getTimesheetHeaders()); setWorkers(getVisibleWorkers())
     const ac = getActiveClients()
     setClients(ac)
     if (ac.length > 0) setSelectedClient(ac[0].code)

@@ -5,7 +5,7 @@ import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import ConfirmDialog from '../../components/ConfirmDialog'
 import {
-  getOffboarding, getWorkers, initiateOffboarding,
+  getOffboarding, getVisibleWorkers, initiateOffboarding,
   tickOffboardingItem, canCloseOffboarding, closeOffboarding,
   OFFBOARDING_ITEMS
 } from '../../lib/mockStore'
@@ -28,7 +28,7 @@ export default function OffboardingExitPage() {
 
   useEffect(() => {
     setRecords(getOffboarding())
-    setWorkers(getWorkers())
+    setWorkers(getVisibleWorkers())
     setRoleState(getRole())
   }, [])
 
@@ -39,14 +39,14 @@ export default function OffboardingExitPage() {
 
   const handleInitiate = () => {
     if (!form.worker_id || !form.last_working_date) return
-    initiateOffboarding(form.worker_id, form.reason, form.last_working_date, role === 'owner' ? 'Owner' : 'HR Admin')
+    initiateOffboarding(form.worker_id, form.reason, form.last_working_date, role === 'owner' ? 'Management' : 'HR Admin')
     refresh()
     setShowInitiate(false)
     setForm({ worker_id:'', reason:'Resignation', last_working_date:'' })
   }
 
   const handleTick = (item_key) => {
-    tickOffboardingItem(selected.id, item_key, role === 'owner' ? 'Owner' : 'HR Admin')
+    tickOffboardingItem(selected.id, item_key, role === 'owner' ? 'Management' : 'HR Admin')
     refresh()
   }
 
@@ -57,7 +57,7 @@ export default function OffboardingExitPage() {
   }
 
   const handleConfirmClose = () => {
-    const result = closeOffboarding(selected.id, role === 'owner' ? 'Owner' : 'HR Admin')
+    const result = closeOffboarding(selected.id, role === 'owner' ? 'Management' : 'HR Admin')
     if (result.success) { refresh(); setSelected(null) }
     setShowCloseConfirm(false)
   }

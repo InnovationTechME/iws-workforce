@@ -8,7 +8,17 @@
       "Bash(npm install:*)",
       "Bash(node -e ':*)",
       "Bash(pkill -f \"next dev\")",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(printf %-20s /__TRACKED_VAR__:)",
+      "Bash(npx next:*)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(wc:*)",
+      "Bash(node scripts/seedWorkers.mjs)",
+      "Bash(node scripts/seedReferenceData.mjs)",
+      "Bash(ls:*)",
+      "Bash(node scripts/runMigration.mjs scripts/migrations/001_three_track_schema.sql)",
+      "Bash(node scripts/runMigrations.mjs)"
     ]
   }
 }

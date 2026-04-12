@@ -4,7 +4,8 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { getWarnings, addWarning, updateWarning, getWorkers, addPenaltyDeduction, makeId, getNextWarningType, generateRefNumber, addLetter, getWorker, getWorkerWarningLevel } from '../../lib/mockStore'
+import { addWarning, updateWarning, getVisibleWorkers, addPenaltyDeduction, makeId, getNextWarningType, generateRefNumber, addLetter, getWorker, getWorkerWarningLevel } from '../../lib/mockStore'
+import { getAllWarnings } from '../../lib/warningService'
 import { formatDate, getStatusTone, TODAY } from '../../lib/utils'
 import { warningLetterHTML } from '../../lib/letterTemplates'
 import LetterViewer from '../../components/LetterViewer'
@@ -20,11 +21,34 @@ export default function WarningsPage() {
   const [viewerHtml, setViewerHtml] = useState(null)
   const [viewerRef, setViewerRef] = useState('')
 
-  useEffect(() => { setWarnings(getWarnings()); setWorkers(getWorkers()) }, [])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
+
+  const reloadWarnings = async () => {
+    setWorkers(getVisibleWorkers())
+    const rows = await getAllWarnings()
+    setWarnings(rows || [])
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setLoadError(null)
+      try {
+        if (!cancelled) await reloadWarnings()
+      } catch (err) {
+        if (!cancelled) setLoadError(err?.message || 'Failed to load warnings')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const filtered = filter === 'all' ? warnings : warnings.filter(w => w.status === filter)
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!form.reason || !form.reason.trim()) { setFormErrors(['Reason is required']); return }
     setFormErrors([])
     const worker = workers.find(w => w.id === form.worker_id)
@@ -44,7 +68,7 @@ export default function WarningsPage() {
         created_at: TODAY
       })
     }
-    setWarnings(getWarnings())
+    try { await reloadWarnings() } catch (err) { setLoadError(err?.message || 'Failed to refresh warnings') }
     setShowDrawer(false)
   }
 
@@ -93,8 +117,8 @@ export default function WarningsPage() {
                 <div key={label} className="metric-row"><span className="label">{label}</span><span className="value" style={{maxWidth:200,textAlign:'right',fontSize:12}}>{value}</span></div>
               ))}
               <div style={{display:'flex',gap:6,marginTop:8}}>
-                {selected.status === 'open' && <button className="btn btn-secondary btn-sm" onClick={() => { updateWarning(selected.id,{status:'monitoring'}); setWarnings(getWarnings()); setSelected({...selected,status:'monitoring'}) }}>→ Monitoring</button>}
-                {selected.status !== 'closed' && <button className="btn btn-ghost btn-sm" onClick={() => { updateWarning(selected.id,{status:'closed'}); setWarnings(getWarnings()); setSelected({...selected,status:'closed'}) }}>Close record</button>}
+                {selected.status === 'open' && <button className="btn btn-secondary btn-sm" onClick={async () => { updateWarning(selected.id,{status:'monitoring'}); await reloadWarnings(); setSelected({...selected,status:'monitoring'}) }}>→ Monitoring</button>}
+                {selected.status !== 'closed' && <button className="btn btn-ghost btn-sm" onClick={async () => { updateWarning(selected.id,{status:'closed'}); await reloadWarnings(); setSelected({...selected,status:'closed'}) }}>Close record</button>}
               </div>
               <button className="btn btn-teal btn-sm" style={{marginTop:8}} onClick={() => {
                 const worker = getWorker(selected.worker_id)

@@ -5,7 +5,9 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import ConfirmDialog from '../../components/ConfirmDialog'
-import { getOnboardingRecords, updateOnboardingRecord, getWorker, addToBlacklist, updateWorker, getWorkers, makeId, getDocumentsByWorker } from '../../lib/mockStore'
+import LetterViewer from '../../components/LetterViewer'
+import { getOnboardingRecords, updateOnboardingRecord, getWorker, addToBlacklist, updateWorker, getVisibleWorkers, makeId, getDocumentsByWorker, addDocument, updateDocument, generateRefNumber, addLetter } from '../../lib/mockStore'
+import { policyManualHTML } from '../../lib/letterTemplates'
 import { formatDate, getStatusTone } from '../../lib/utils'
 
 const STAGES = [
@@ -15,16 +17,50 @@ const STAGES = [
   { key:'arrival', label:'Arrival & Active', icon:'✅' },
 ]
 
-const DOC_CHECKLIST = [
+// Track 1 — IT Field Staff (direct_staff, not Office Staff)
+const CHECKLIST_IT_FIELD = [
   { key:'passport', label:'Passport Copy', required:true },
   { key:'photo', label:'Passport Photo', required:true },
-  { key:'cv', label:'CV / Resume', required:false },
-  { key:'medical_fitness', label:'Medical Certificate', required:true },
-  { key:'offer_letter', label:'Signed Offer Letter', required:true },
-  { key:'emirates_id', label:'Emirates ID', required:false },
-  { key:'visa', label:'Visa Copy', required:false },
-  { key:'labour_card', label:'Labour Card', required:false },
+  { key:'uae_visa', label:'UAE Visa (Innovation Tech sponsored)', required:true },
+  { key:'emirates_id', label:'Emirates ID', required:true },
+  { key:'medical_fitness', label:'Medical Fitness Certificate', required:true },
+  { key:'signed_offer_letter', label:'Signed Offer Letter', required:true },
+  { key:'labour_card', label:'IT Labour Card', required:true },
+  { key:'medical_insurance', label:'Health Insurance', required:true, tracksExpiry:true, note:'IT-provided. Upload certificate with worker name visible.' },
+  { key:'workers_compensation', label:"Workmen's Compensation (WC)", required:true, tracksExpiry:true, requiresHighlight:true, note:'Upload the WC schedule page showing this worker\u2019s name highlighted.' },
 ]
+const CHECKLIST_IT_FIELD_OPTIONAL = [
+  { key:'iloe_certificate', label:'ILOE Certificate (when available)', required:false, note:'Non-blocking — upload when issued.' },
+]
+
+// Track 2 — Contract Workers
+const CHECKLIST_CONTRACT = [
+  { key:'passport', label:'Passport Copy', required:true },
+  { key:'photo', label:'Passport Photo', required:true },
+  { key:'uae_visa', label:"UAE Visa (worker's own visa)", required:true },
+  { key:'emirates_id', label:'Emirates ID or National ID', required:true },
+  { key:'medical_insurance', label:"Health Insurance (worker's own)", required:true, tracksExpiry:true, note:'Worker provides own health insurance. Upload their certificate.' },
+  { key:'workers_compensation', label:"Workmen's Compensation (WC)", required:true, tracksExpiry:true, requiresHighlight:true, note:'IT provides WC cover. Upload WC schedule page with this worker\u2019s name highlighted.' },
+]
+
+// Track 3 — Supplier Workers
+const CHECKLIST_SUPPLIER = [
+  { key:'passport', label:'Passport Copy', required:true },
+  { key:'photo', label:'Passport Photo', required:true },
+  { key:'uae_visa', label:'UAE Visa (employer-sponsored)', required:true },
+  { key:'emirates_id', label:'Emirates ID or National ID', required:true },
+  { key:'medical_insurance', label:'Health Insurance (employer-provided)', required:true, tracksExpiry:true, note:'Supplier\u2019s employer provides health insurance. Obtain and upload certificate.' },
+  { key:'workers_compensation', label:"Workmen's Compensation (WC)", required:true, tracksExpiry:true, requiresHighlight:true, note:'Supplier provides WC. Upload their WC schedule page with worker name highlighted.' },
+]
+
+function getChecklistForWorker(worker) {
+  if (!worker) return { primary: CHECKLIST_IT_FIELD, optional: CHECKLIST_IT_FIELD_OPTIONAL, trackLabel: 'IT Field Staff' }
+  const track = worker.entry_track
+  const cat = worker.category
+  if (track === 'contract_worker' || cat === 'Contract Worker') return { primary: CHECKLIST_CONTRACT, optional: [], trackLabel: 'Contract Worker' }
+  if (track === 'subcontractor_company_worker' || cat === 'Subcontract Worker') return { primary: CHECKLIST_SUPPLIER, optional: [], trackLabel: 'Supplier Worker' }
+  return { primary: CHECKLIST_IT_FIELD, optional: CHECKLIST_IT_FIELD_OPTIONAL, trackLabel: cat === 'Office Staff' ? 'IT Office Staff' : 'IT Field Staff' }
+}
 
 function getStageIndex(status) {
   if (!status) return 0
@@ -36,16 +72,20 @@ function getStageIndex(status) {
   return 0
 }
 
-function getProgress(record, docs) {
-  let score = 0, total = 8
-  if (record.arrival_date) score++
-  if (record.medical_result === 'passed') score++
-  if (record.documentation_complete) score += 2
-  if (record.onboarding_status?.includes('Converted')) score += 2
-  // Count uploaded docs
-  const uploadedDocs = docs.filter(d => DOC_CHECKLIST.some(c => c.key === d.document_type && (d.status === 'valid' || d.status === 'expiring_soon'))).length
-  score += Math.min(uploadedDocs, 2)
-  return Math.min(100, Math.round((score / total) * 100))
+function getRequiredUploaded(docs, checklist) {
+  const required = (checklist || []).filter(c => c.required)
+  return required.filter(c => docs.some(d => d.document_type === c.key && (d.status === 'valid' || d.status === 'expiring_soon')))
+}
+
+function getProgress(record, docs, worker) {
+  const { primary } = getChecklistForWorker(worker)
+  const required = primary.filter(c => c.required)
+  const uploaded = getRequiredUploaded(docs, primary).length
+  const docShare = required.length ? (uploaded / required.length) * 50 : 0
+  let pct = 25 + docShare
+  if (record.onboarding_status?.includes('Converted') || record.documentation_complete) pct += 12.5
+  if (record.arrival_date) pct += 12.5
+  return Math.min(100, Math.round(pct))
 }
 
 export default function OnboardingPage() {
@@ -58,8 +98,12 @@ export default function OnboardingPage() {
   const [showBlacklistConfirm, setShowBlacklistConfirm] = useState(false)
   const [medForm, setMedForm] = useState({ medical_date:'', medical_result:'passed', medical_notes:'' })
   const [medErrors, setMedErrors] = useState([])
+  const [expandedDoc, setExpandedDoc] = useState(null)
+  const [uploadForm, setUploadForm] = useState({ issue_date:'', expiry_date:'', file:null, highlight_confirmed:false })
+  const [viewerHtml, setViewerHtml] = useState(null)
+  const [viewerRef, setViewerRef] = useState('')
 
-  useEffect(() => { setRecords(getOnboardingRecords()); setWorkers(getWorkers()) }, [])
+  useEffect(() => { setRecords(getOnboardingRecords()); setWorkers(getVisibleWorkers()) }, [])
 
   const selectRecord = (rec) => {
     setSelected(rec)
@@ -84,6 +128,46 @@ export default function OnboardingPage() {
     setShowBlacklistConfirm(false); setRecords(getOnboardingRecords())
   }
 
+  const handleDocUpload = (docKey, docMeta) => {
+    if (!selected || !selectedWorker) return
+    const existing = workerDocs.find(d => d.document_type === docKey)
+    const ext = uploadForm.file ? uploadForm.file.name.split('.').pop() : 'pdf'
+    const fileName = uploadForm.file ? `${selectedWorker.worker_number}_${selectedWorker.full_name.replace(/\s+/g,'_')}_${docKey}.${ext}` : null
+    const today = new Date().toISOString().split('T')[0]
+    const expDate = uploadForm.expiry_date || null
+    const status = expDate ? (() => { const d = Math.ceil((new Date(expDate) - new Date()) / (1000*60*60*24)); return d < 0 ? 'expired' : d <= 30 ? 'expiring_soon' : 'valid' })() : 'valid'
+    const payload = {
+      issue_date: uploadForm.issue_date || today,
+      expiry_date: expDate,
+      status,
+      file_name: fileName || (existing?.file_name || null),
+      notes: 'Uploaded during onboarding',
+      is_blocking: !!docMeta?.required,
+    }
+    if (docMeta?.requiresHighlight) {
+      payload.doc_subtype = 'highlighted_page'
+      payload.highlighted_name_confirmed = !!uploadForm.highlight_confirmed
+    }
+    if (existing) { updateDocument(existing.id, payload) }
+    else {
+      const cat = ['passport','emirates_id','photo','cv'].includes(docKey) ? 'personal'
+        : ['signed_offer_letter','offer_letter','labour_card','uae_visa','bank_account_details','employment_contract'].includes(docKey) ? 'employment'
+        : ['site_induction'].includes(docKey) ? 'site'
+        : 'compliance'
+      addDocument({ worker_id: selectedWorker.id, document_type: docKey, document_category: cat, ...payload })
+    }
+    // Mirror expiry dates onto the worker record
+    if (docKey === 'medical_insurance' && expDate) {
+      updateWorker(selectedWorker.id, { health_insurance_expiry: expDate })
+    }
+    if (docKey === 'workers_compensation' && expDate) {
+      updateWorker(selectedWorker.id, { workmen_comp_expiry: expDate, wc_highlighted_name_confirmed: !!uploadForm.highlight_confirmed })
+    }
+    setWorkerDocs(getDocumentsByWorker(selectedWorker.id))
+    setExpandedDoc(null)
+    setUploadForm({ issue_date:'', expiry_date:'', file:null, highlight_confirmed:false })
+  }
+
   const handleConvert = () => {
     if (selectedWorker) {
       updateWorker(selectedWorker.id, { status:'Active', active:true, onboarding_status:'Active', joining_date:'2026-04-10' })
@@ -96,7 +180,7 @@ export default function OnboardingPage() {
   const converted = records.filter(r => r.onboarding_status?.includes('Converted')).length
   const failed = records.filter(r => r.onboarding_status?.includes('Failed')).length
 
-  return (
+  return (<>
     <AppShell pageTitle="Onboarding">
       <PageHeader eyebrow="Onboarding" title="Active onboarding" description="Track candidates through documentation, visa processing, and conversion to active workers." />
 
@@ -116,7 +200,7 @@ export default function OnboardingPage() {
               {records.map(r => {
                 const w = workers.find(wk => wk.id === r.worker_id)
                 const docs = w ? getDocumentsByWorker(r.worker_id) : []
-                const progress = getProgress(r, docs)
+                const progress = getProgress(r, docs, w)
                 const stageIdx = getStageIndex(r.onboarding_status)
                 return (
                   <div key={r.id} style={{border:'1px solid var(--border)',borderRadius:8,padding:'14px 16px',cursor:'pointer',background:selected?.id===r.id?'#eff6ff':'#fff',transition:'all .15s'}} onClick={() => selectRecord(r)}>
@@ -156,7 +240,7 @@ export default function OnboardingPage() {
             </div>
 
             {/* Progress bar */}
-            {(() => { const progress = getProgress(selected, workerDocs); return (
+            {(() => { const progress = getProgress(selected, workerDocs, selectedWorker); return (
               <div style={{background:'var(--teal-bg)',border:'1px solid var(--teal-border)',borderRadius:8,padding:'12px 16px',marginBottom:16}}>
                 <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
                   <span style={{fontSize:12,fontWeight:600}}>Overall Progress</span>
@@ -183,25 +267,84 @@ export default function OnboardingPage() {
               })}
             </div>
 
-            {/* Document checklist */}
-            <div style={{marginBottom:16}}>
-              <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:8}}>Document Checklist</div>
-              {DOC_CHECKLIST.map(doc => {
-                const uploaded = workerDocs.some(d => d.document_type === doc.key && (d.status === 'valid' || d.status === 'expiring_soon'))
+            {/* Document checklist — track-specific */}
+            {(() => {
+              const { primary, optional, trackLabel } = getChecklistForWorker(selectedWorker)
+              const renderItem = (doc, isOptional) => {
+                const existing = workerDocs.find(d => d.document_type === doc.key)
+                const uploaded = !!existing && (existing.status === 'valid' || existing.status === 'expiring_soon')
+                const isExpanded = expandedDoc === doc.key
+                const expiryOnFile = existing?.expiry_date
+                const highlightConfirmed = existing?.highlighted_name_confirmed === true
+                const wcNeedsHighlight = doc.requiresHighlight && uploaded && !highlightConfirmed
                 return (
-                  <div key={doc.key} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid #f1f5f9'}}>
-                    <div style={{width:22,height:22,borderRadius:4,background:uploaded?'var(--success)':'var(--border)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                      {uploaded && <span style={{color:'white',fontSize:12,fontWeight:700}}>✓</span>}
+                  <div key={doc.key}>
+                    <div style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid #f1f5f9'}}>
+                      <div style={{width:22,height:22,borderRadius:'50%',background:uploaded && !wcNeedsHighlight ? '#16a34a' : doc.required ? '#fecaca' : '#e2e8f0',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                        {uploaded && !wcNeedsHighlight ? <span style={{color:'white',fontSize:12,fontWeight:700}}>✓</span> : doc.required ? <span style={{color:'#dc2626',fontSize:10,fontWeight:700}}>!</span> : null}
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:12,fontWeight:doc.required&&!uploaded?600:400,color:uploaded?'var(--muted)':'var(--text)'}}>{doc.label}</div>
+                        {doc.note && <div style={{fontSize:10,color:'var(--hint)',marginTop:2}}>{doc.note}</div>}
+                        {uploaded && expiryOnFile && <div style={{fontSize:10,color:'var(--muted)',marginTop:2}}>Expires {formatDate(expiryOnFile)}</div>}
+                        {wcNeedsHighlight && <div style={{fontSize:10,color:'#dc2626',marginTop:2}}>⚠ Name highlight not confirmed</div>}
+                      </div>
+                      {doc.required && !uploaded && <span style={{fontSize:9,fontWeight:700,color:'#dc2626',background:'#fee2e2',padding:'2px 6px',borderRadius:10}}>BLOCKING</span>}
+                      {isOptional && <span style={{fontSize:9,fontWeight:700,color:'#92400e',background:'#fef3c7',padding:'2px 6px',borderRadius:10}}>OPTIONAL</span>}
+                      {uploaded ? (
+                        <div style={{display:'flex',alignItems:'center',gap:6}}>
+                          <span style={{fontSize:10,color:'var(--success)',fontWeight:500}}>✓ On file</span>
+                          <button className="btn btn-ghost btn-sm" style={{fontSize:10,padding:'2px 6px'}} onClick={() => { setExpandedDoc(isExpanded?null:doc.key); setUploadForm({issue_date:new Date().toISOString().split('T')[0],expiry_date:existing?.expiry_date||'',file:null,highlight_confirmed:highlightConfirmed}) }}>Replace</button>
+                        </div>
+                      ) : (
+                        <button className="btn btn-teal btn-sm" style={{fontSize:11,padding:'3px 10px'}} onClick={() => { setExpandedDoc(isExpanded?null:doc.key); setUploadForm({issue_date:new Date().toISOString().split('T')[0],expiry_date:'',file:null,highlight_confirmed:false}) }}>📎 Upload</button>
+                      )}
                     </div>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:12,fontWeight:uploaded?400:500,color:uploaded?'var(--muted)':'var(--text)',textDecoration:uploaded?'line-through':'none'}}>{doc.label}</div>
-                    </div>
-                    {doc.required && !uploaded && <span style={{fontSize:9,fontWeight:700,color:'#dc2626',background:'#fee2e2',padding:'2px 6px',borderRadius:10}}>REQUIRED</span>}
-                    {uploaded && <span style={{fontSize:10,color:'var(--success)'}}>✓ On file</span>}
+                    {isExpanded && (
+                      <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:6,padding:'12px 14px',margin:'4px 0 8px 32px'}}>
+                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+                          <div className="form-field"><label className="form-label" style={{fontSize:10}}>Issue date</label><input className="form-input" type="date" style={{fontSize:12,padding:'4px 8px'}} value={uploadForm.issue_date} onChange={e => setUploadForm({...uploadForm,issue_date:e.target.value})} /></div>
+                          <div className="form-field"><label className="form-label" style={{fontSize:10}}>Expiry date {doc.tracksExpiry ? '*' : ''}</label><input className="form-input" type="date" style={{fontSize:12,padding:'4px 8px'}} value={uploadForm.expiry_date} onChange={e => setUploadForm({...uploadForm,expiry_date:e.target.value})} /></div>
+                        </div>
+                        {doc.requiresHighlight && (
+                          <label style={{display:'flex',alignItems:'center',gap:8,fontSize:11,marginBottom:8,cursor:'pointer',padding:'6px 8px',background:'#fff',borderRadius:4,border:'1px solid #e2e8f0'}}>
+                            <input type="checkbox" checked={uploadForm.highlight_confirmed} onChange={e => setUploadForm({...uploadForm, highlight_confirmed: e.target.checked})} style={{accentColor:'#0d9488'}} />
+                            <span style={{fontWeight:500}}>Worker name highlighted on document ✓</span>
+                          </label>
+                        )}
+                        <div className="form-field" style={{marginBottom:8}}>
+                          <input type="file" className="form-input" accept=".pdf,.jpg,.jpeg,.png" style={{fontSize:11,padding:'4px 6px'}} onChange={e => { const f=e.target.files[0]; if(f) setUploadForm({...uploadForm,file:f}) }} />
+                          {uploadForm.file && <div style={{fontSize:10,color:'var(--teal)',marginTop:3}}>📎 {uploadForm.file.name}</div>}
+                        </div>
+                        <div style={{display:'flex',gap:6}}>
+                          <button className="btn btn-teal btn-sm" style={{fontSize:11}} onClick={() => handleDocUpload(doc.key, doc)} disabled={doc.tracksExpiry && !uploadForm.expiry_date}>Save</button>
+                          <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={() => setExpandedDoc(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
-              })}
-            </div>
+              }
+              return (
+                <>
+                  <div style={{marginBottom:16}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                      <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Document Checklist · {trackLabel}</div>
+                      <div style={{fontSize:10,color:'var(--hint)'}}>
+                        <span style={{color:'#dc2626',fontWeight:600}}>●</span> Blocking ({primary.filter(p=>p.required).length})
+                      </div>
+                    </div>
+                    {primary.map(d => renderItem(d, false))}
+                  </div>
+                  {optional.length > 0 && (
+                    <div style={{marginBottom:16,background:'#fffbeb',border:'1px solid #fde68a',borderRadius:6,padding:'10px 12px'}}>
+                      <div style={{fontSize:11,fontWeight:700,color:'#92400e',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6}}>Optional — non-blocking</div>
+                      {optional.map(d => renderItem(d, true))}
+                    </div>
+                  )}
+                </>
+              )
+            })()}
 
             {/* Medical & Actions */}
             <div style={{display:'flex',flexDirection:'column',gap:8}}>
@@ -212,9 +355,38 @@ export default function OnboardingPage() {
               {selected.medical_result === 'pending' && (
                 <button className="btn btn-primary" onClick={() => setShowMedicalDrawer(true)}>Record Medical Result</button>
               )}
-              {selected.onboarding_status === 'Documentation' && (
-                <button className="btn btn-teal" onClick={handleConvert}>✅ Complete Onboarding → Move to Active</button>
-              )}
+              {selected.onboarding_status === 'Documentation' && (() => {
+                const { primary } = getChecklistForWorker(selectedWorker)
+                const requiredDocs = primary.filter(c => c.required)
+                const issues = []
+                for (const c of requiredDocs) {
+                  const d = workerDocs.find(x => x.document_type === c.key && (x.status === 'valid' || x.status === 'expiring_soon'))
+                  if (!d) { issues.push({ label: c.label, reason: 'not uploaded' }); continue }
+                  if (c.tracksExpiry && !d.expiry_date) issues.push({ label: c.label, reason: 'expiry date missing' })
+                  if (c.requiresHighlight && d.highlighted_name_confirmed !== true) issues.push({ label: c.label, reason: 'name highlight not confirmed' })
+                }
+                const allRequiredDone = issues.length === 0
+                return (<>
+                  {!allRequiredDone && (
+                    <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:6,padding:'10px 12px',fontSize:12}}>
+                      <div style={{fontWeight:600,color:'#dc2626',marginBottom:4}}>Cannot convert to Active — outstanding items:</div>
+                      {issues.map((c,i) => <div key={i} style={{color:'#dc2626',fontSize:11}}>• {c.label} — {c.reason}</div>)}
+                    </div>
+                  )}
+                  {allRequiredDone && (
+                    <div style={{background:'#ecfdf5',border:'1px solid #6ee7b7',borderRadius:6,padding:'10px 12px',fontSize:12,color:'#065f46',fontWeight:500}}>✓ All required documents on file — ready to convert</div>
+                  )}
+                  <button className="btn btn-teal" disabled={!allRequiredDone} style={!allRequiredDone?{opacity:0.5,cursor:'not-allowed'}:{}} onClick={handleConvert}>✅ Complete Onboarding → Move to Active</button>
+                </>)
+              })()}
+              <button className="btn btn-teal" onClick={() => {
+                const worker = getWorker(selectedWorker.id) || selectedWorker
+                const ref = generateRefNumber('policy_manual')
+                const today = new Date().toISOString().split('T')[0]
+                const html = policyManualHTML(worker, ref, today)
+                addLetter({ id: makeId('let'), ref_number: ref, letter_type:'policy_manual', worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language:'english', issued_date: today, issued_by:'HR Admin', linked_record_id: null, status:'issued', notes:'Issued at onboarding' })
+                setViewerHtml(html); setViewerRef(ref)
+              }}>📋 Generate Policy Manual</button>
               <Link href={'/workers/'+selected.worker_id} className="btn btn-secondary">Open worker profile →</Link>
             </div>
           </div>
@@ -245,5 +417,6 @@ export default function OnboardingPage() {
         <ConfirmDialog title="Close record and blacklist?" message={selectedWorker?.full_name+' failed medical. This closes the record and adds them to the blacklist.'} confirmLabel="Confirm" confirmTone="btn-danger" onConfirm={handleBlacklist} onCancel={() => setShowBlacklistConfirm(false)} />
       )}
     </AppShell>
-  )
+    {viewerHtml && <LetterViewer html={viewerHtml} refNumber={viewerRef} onClose={() => { setViewerHtml(null); setViewerRef('') }} />}
+  </>)
 }

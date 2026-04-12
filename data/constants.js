@@ -4,10 +4,22 @@ export const NATIONALITIES = [
 ]
 
 export const POSITIONS = [
-  'Electrical Foreman','Electrician','Pipe Fitter','Structural Fabricator','Mechanic',
-  'Aluminium Welder','Helper','Welder (FCAW)','Rigger','Scaffolder','Painter','Blaster',
-  'Instrument Technician','HSE Officer','Site Engineer','Safety Officer','Driver',
-  'Office Admin','HR Officer','PRO','Foreman','Supervisor','Payroll Admin','HR Admin'
+  // Welding
+  'Welder (SMAW)','Welder (GMAW)','Welder (FCAW)','Welder (GTAW)','Welder (Combi)',
+  // Fabrication
+  'Structural Fabricator','Pipe Fabricator','Pipe Fitter','Aluminum Fabricator',
+  // Surface Treatment
+  'Sand Blaster','Spray Painter',
+  // Electrical & Mechanical
+  'Electrical Technician','Mechanical Technician','Instrumentation Technician',
+  // Supervision & Management
+  'Welding Foreman','Fabrication Foreman','Electrical Foreman','Rigger / Banksman','Scaffolder','Foreman (General)','Supervisor',
+  // Safety
+  'Safety Officer','First Aider',
+  // Support
+  'Helper','Storekeeper','Driver','Admin / Clerk',
+  // Office
+  'HR Admin','Payroll Admin','Operations Coordinator','Project Manager','Document Controller','Accountant'
 ]
 
 export const DOCUMENT_CATEGORIES = {
@@ -19,6 +31,7 @@ export const DOCUMENT_CATEGORIES = {
   exit: { label:'Termination & Exit', types:['resignation_letter','termination_notice','eos_calculation','exit_clearance','experience_letter','final_payslip'] }
 }
 
+// Pack includes site/compliance docs only — employment_contract deliberately excluded (internal document, not for client packs)
 export const PACK_DOCUMENT_TYPES = [
   'passport','photo','emirates_id','workers_compensation',
   'medical_fitness','labour_card','labour_permit','site_access_card'

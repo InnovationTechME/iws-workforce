@@ -6,9 +6,10 @@ import AppShell from '../../../components/AppShell'
 import PageHeader from '../../../components/PageHeader'
 import StatusBadge from '../../../components/StatusBadge'
 import LetterViewer from '../../../components/LetterViewer'
-import { getWorker, getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS, calculateLeaveBalance, getILOEStatus, updateDocument, generateDocFileName } from '../../../lib/mockStore'
+import { getDocumentsByWorker, getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS, calculateLeaveBalance, getILOEStatus, updateDocument, generateDocFileName } from '../../../lib/mockStore'
+import { getWorkerById } from '../../../lib/workerService'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
-import { offerLetterHTML, warningLetterHTML, experienceLetterHTML, terminationWithNoticeHTML, terminationWithoutNoticeHTML, resignationAcceptanceHTML, TERMINATION_GROUNDS_LIST } from '../../../lib/letterTemplates'
+import { offerLetterHTML, warningLetterHTML, experienceLetterHTML, terminationWithNoticeHTML, terminationWithoutNoticeHTML, resignationAcceptanceHTML, policyManualHTML, TERMINATION_GROUNDS_LIST } from '../../../lib/letterTemplates'
 
 export default function WorkerDetailPage() {
   const { id } = useParams()
@@ -27,15 +28,31 @@ export default function WorkerDetailPage() {
   const [terminationType, setTerminationType] = useState('notice')
   const [terminationDetails, setTerminationDetails] = useState({ notice_days:30, last_working_date:'', reason:'', reason_body:'', ground_key:'misconduct', additional_details:'', effective_date:new Date().toISOString().split('T')[0], resignation_date:'', notice_period:'60 days', additional_note:'' })
 
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
+
   useEffect(() => {
-    const w = getWorker(id)
-    setWorker(w)
-    if (w) {
-      setDocs(getDocumentsByWorker(id))
-      setCerts(getCertificationsByWorker(id))
-      setWarnings(getWarningsByWorker(id))
-      setLetters(getLettersByWorker(id))
-    }
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setLoadError(null)
+      try {
+        const w = await getWorkerById(id)
+        if (cancelled) return
+        setWorker(w)
+        if (w) {
+          setDocs(getDocumentsByWorker(id))
+          setCerts(getCertificationsByWorker(id))
+          setWarnings(getWarningsByWorker(id))
+          setLetters(getLettersByWorker(id))
+        }
+      } catch (err) {
+        if (!cancelled) setLoadError(err?.message || 'Failed to load worker')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
   }, [id])
 
   if (!worker) return <AppShell pageTitle="Worker"><div className="page-shell"><div className="panel"><div className="empty-state"><h3>Worker not found</h3></div></div></div></AppShell>
@@ -48,6 +65,19 @@ export default function WorkerDetailPage() {
   return (
     <>
     <AppShell pageTitle={worker.full_name}>
+      {worker.active === false && (
+        <div style={{background:'#f1f5f9',border:'1.5px solid #cbd5e1',borderRadius:8,padding:'14px 20px',marginBottom:16,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <div style={{display:'flex',alignItems:'center',gap:12}}>
+            <span style={{fontSize:20}}>⚠</span>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:'#334155'}}>Inactive Worker — File closed {worker.end_date ? formatDate(worker.end_date) : ''}</div>
+              <div style={{fontSize:12,color:'#64748b',marginTop:2}}>This worker is not on active payroll. Reactivation requires Operations and Owner approval.</div>
+            </div>
+          </div>
+          <button className="btn btn-secondary btn-sm">Request Reactivation</button>
+        </div>
+      )}
+
       <PageHeader eyebrow="Worker detail" title={worker.full_name}
         description={`${worker.worker_number} · ${worker.category} · ${worker.trade_role}`}
         actions={<div style={{display:'flex',gap:8}}><Link href="/workers" className="btn btn-secondary">← Workers</Link></div>}
@@ -86,7 +116,7 @@ export default function WorkerDetailPage() {
         {tab === 'profile' && (
           <div>
             <div className="form-grid">
-              {[['Full name',worker.full_name],['Worker number',worker.worker_number],['Category',worker.category],['Trade / role',worker.trade_role],['Nationality',worker.nationality],['Passport',worker.passport_number],['Date of birth',worker.date_of_birth||'—'],['Passport expiry',formatDate(worker.passport_expiry)],['Emirates ID',worker.emirates_id||'—'],['EID expiry',formatDate(worker.emirates_id_expiry)],['Mobile',worker.mobile_number],['Email',worker.email],['Visa company',worker.visa_company],['Visa number',worker.visa_number||'—'],['Project site',worker.project_site],['Joining date',formatDate(worker.joining_date)],['Onboarding status',worker.onboarding_status]].map(([label,value]) => (
+              {[['Full name',worker.full_name],['Worker number',worker.worker_number],['Category',worker.category],['Trade / role',worker.trade_role],['Nationality',worker.nationality],['Passport',worker.passport_number],['Date of birth',worker.date_of_birth||'—'],['Passport expiry',formatDate(worker.passport_expiry)],['Emirates ID',worker.emirates_id||'—'],['EID expiry',formatDate(worker.emirates_id_expiry)],['Mobile',worker.mobile_number],['WhatsApp',worker.whatsapp_number||'—'],['Email',worker.email],['Visa company',worker.visa_company],['Visa number',worker.visa_number||'—'],['Project site',worker.project_site],['Joining date',formatDate(worker.joining_date)],['Onboarding status',worker.onboarding_status]].map(([label,value]) => (
                 <div key={label}>
                   <div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>{label}</div>
                   <div style={{fontSize:13,fontWeight:500}}>{value || '—'}</div>
@@ -155,6 +185,63 @@ export default function WorkerDetailPage() {
 
         {tab === 'documents' && (
           <div>
+            {(() => {
+              const today = new Date(); today.setHours(0,0,0,0)
+              const PACK_DOCS = [
+                { key:'passport', label:'Passport Copy', tracksExpiry:false, isPack:true },
+                { key:'photo', label:'Passport Photo', tracksExpiry:false, isPack:true },
+                { key:'uae_visa', label:'UAE Visa', tracksExpiry:true, isPack:true },
+                { key:'emirates_id', label:'Emirates ID', tracksExpiry:true, isPack:true },
+                { key:'medical_insurance', label:'Health Insurance', tracksExpiry:true, isPack:false, note:'Compliance only — not in pack' },
+                { key:'workers_compensation', label:'WC Certificate', tracksExpiry:true, isPack:true, requiresHighlight:true },
+              ]
+              const cardFor = (meta) => {
+                const d = docs.find(x => x.document_type === meta.key)
+                const has = d && d.status !== 'missing' && (d.file_name || d.expiry_date)
+                let tone = 'neutral', label = 'Missing', bg = '#f1f5f9', border = '#e2e8f0'
+                if (has) {
+                  if (d.status === 'expired' || (d.expiry_date && new Date(d.expiry_date) < today)) { tone='danger'; label='Expired'; bg='#fef2f2'; border='#fecaca' }
+                  else if (d.status === 'expiring_soon') { tone='warning'; label='Expiring'; bg='#fffbeb'; border='#fde68a' }
+                  else { tone='success'; label='Valid'; bg='#ecfdf5'; border='#6ee7b7' }
+                }
+                const wcHighlightOk = meta.key !== 'workers_compensation' || d?.highlighted_name_confirmed === true
+                const packBlockingExpired = meta.isPack && meta.key === 'workers_compensation' && d?.expiry_date && new Date(d.expiry_date) < today
+                return (
+                  <div key={meta.key} style={{background:bg,border:`1px solid ${border}`,borderRadius:8,padding:'10px 12px'}}>
+                    <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>{meta.label}</div>
+                    <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+                      <StatusBadge label={label} tone={tone} />
+                      {meta.isPack && <span style={{fontSize:9,fontWeight:600,background:'#0d9488',color:'#fff',padding:'2px 6px',borderRadius:10}}>IN PACK</span>}
+                    </div>
+                    {meta.tracksExpiry && d?.expiry_date && <div style={{fontSize:11,color:'var(--muted)'}}>Expires {formatDate(d.expiry_date)}</div>}
+                    {meta.key === 'workers_compensation' && has && (
+                      <div style={{fontSize:10,marginTop:3,color:wcHighlightOk?'#16a34a':'#dc2626'}}>
+                        {wcHighlightOk ? '✓ Name highlighted' : '⚠ Name not confirmed'}
+                      </div>
+                    )}
+                    {packBlockingExpired && <div style={{fontSize:10,fontWeight:600,marginTop:4,color:'#991b1b',background:'#fee2e2',padding:'3px 6px',borderRadius:4}}>PACK BLOCKED — Renew to restore pack access</div>}
+                    {meta.note && <div style={{fontSize:10,color:'var(--hint)',marginTop:3,fontStyle:'italic'}}>{meta.note}</div>}
+                    <button className="btn btn-teal btn-sm" style={{fontSize:10,padding:'3px 8px',marginTop:6}} onClick={() => { setSelectedDoc(d || { document_type: meta.key, document_category: 'personal', worker_id: id, status: 'missing' }); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:d?.expiry_date||'', file_name:null, file_original:null, notes:'' }) }}>{has ? 'Update' : 'Upload'}</button>
+                  </div>
+                )
+              }
+              return (
+                <div style={{marginBottom:20,padding:'14px 16px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:12}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>Pack Documents — Required for Document Pack Generation</div>
+                      <div style={{fontSize:11,color:'var(--hint)'}}>Only WC expiry blocks pack generation. Health insurance is tracked for compliance only.</div>
+                    </div>
+                    <Link href="/packs" style={{fontSize:12,color:'#0d9488',fontWeight:500}}>Build Pack →</Link>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:10}}>
+                    {PACK_DOCS.map(cardFor)}
+                  </div>
+                </div>
+              )
+            })()}
+
+            <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6}}>All documents on file</div>
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Type</th><th>Category</th><th>Issue date</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
@@ -242,7 +329,16 @@ export default function WorkerDetailPage() {
           </div>
         )}
 
-        {tab === 'certifications' && (
+        {tab === 'certifications' && (<>
+          <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,padding:'12px 14px',marginBottom:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:'#0f172a',textTransform:'uppercase',letterSpacing:0.5,marginBottom:8}}>Medical Certificate Verification</div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              <a href="https://www.tamm.abudhabi/wb/doh/sick-leave-validation" target="_blank" rel="noopener noreferrer" style={{padding:'6px 10px',background:'#0d9488',color:'white',borderRadius:6,textDecoration:'none',fontSize:11,fontWeight:600}}>↗ TAMM (Abu Dhabi)</a>
+              <a href="https://services.dha.gov.ae/sheryan/wps/portal/home/services-professional/online-verification" target="_blank" rel="noopener noreferrer" style={{padding:'6px 10px',background:'#1d4ed8',color:'white',borderRadius:6,textDecoration:'none',fontSize:11,fontWeight:600}}>↗ Sheryan (Dubai)</a>
+              <a href="https://mohap.gov.ae/en/services/attestation-of-medical-leaves-and-reports" target="_blank" rel="noopener noreferrer" style={{padding:'6px 10px',background:'#475569',color:'white',borderRadius:6,textDecoration:'none',fontSize:11,fontWeight:600}}>↗ MOHAP (Other Emirates)</a>
+            </div>
+            <div style={{fontSize:10,color:'#64748b',marginTop:6}}>Use these links to verify the authenticity of any medical certificate before accepting it.</div>
+          </div>
           <div className="table-wrap">
             <table>
               <thead><tr><th>Certification</th><th>Issuer</th><th>Expiry</th><th>Status</th></tr></thead>
@@ -258,7 +354,7 @@ export default function WorkerDetailPage() {
               </tbody>
             </table>
           </div>
-        )}
+        </>)}
 
         {tab === 'warnings' && (
           <div className="table-wrap">
@@ -313,6 +409,14 @@ export default function WorkerDetailPage() {
                 setLetters(getLettersByWorker(worker.id))
                 setViewerHtml(html); setViewerRef(ref)
               }}>+ Experience Letter</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => {
+                const ref = generateRefNumber('policy_manual')
+                const today = new Date().toISOString().split('T')[0]
+                const html = policyManualHTML(worker, ref, today)
+                addLetter({ id: makeId('let'), ref_number: ref, letter_type:'policy_manual', worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language:'english', issued_date: today, issued_by:'HR Admin', linked_record_id:null, status:'issued', notes:'' })
+                setLetters(getLettersByWorker(worker.id))
+                setViewerHtml(html); setViewerRef(ref)
+              }}>+ Policy Manual</button>
             </div>
 
             <div style={{marginTop:16,paddingTop:14,borderTop:'2px solid var(--border)'}}>
@@ -364,9 +468,9 @@ export default function WorkerDetailPage() {
                   <thead><tr><th>Ref number</th><th>Type</th><th>Date</th><th>Language</th><th>Issued by</th><th>Actions</th></tr></thead>
                   <tbody>
                     {letters.map(l => {
-                      const typeLabels = { offer_letter:'Offer Letter', warning_1st:'1st Warning', warning_2nd:'2nd Warning', warning_final:'Final Warning', experience_letter:'Experience Letter', memo:'Memo', termination_notice:'Termination (notice)', termination_no_notice:'Termination (no notice)', resignation_acceptance:'Resignation acceptance' }
-                      const toneBg = { warning_1st:'#fef9c3', warning_2nd:'#fed7aa', warning_final:'#fee2e2', offer_letter:'#f0fdf4', experience_letter:'#eff6ff', memo:'#f8fafc', termination_notice:'#fff1f2', termination_no_notice:'#fef2f2', resignation_acceptance:'#f0fdf4' }
-                      const toneColor = { warning_1st:'#854d0e', warning_2nd:'#9a3412', warning_final:'#991b1b', offer_letter:'#166534', experience_letter:'#1e40af', memo:'#475569' }
+                      const typeLabels = { offer_letter:'Offer Letter', warning_1st:'1st Warning', warning_2nd:'2nd Warning', warning_final:'Final Warning', experience_letter:'Experience Letter', memo:'Memo', termination_notice:'Termination (notice)', termination_no_notice:'Termination (no notice)', resignation_acceptance:'Resignation acceptance', policy_manual:'Policy Manual' }
+                      const toneBg = { warning_1st:'#fef9c3', warning_2nd:'#fed7aa', warning_final:'#fee2e2', offer_letter:'#f0fdf4', experience_letter:'#eff6ff', memo:'#f8fafc', termination_notice:'#fff1f2', termination_no_notice:'#fef2f2', resignation_acceptance:'#f0fdf4', policy_manual:'#f0fdfa' }
+                      const toneColor = { warning_1st:'#854d0e', warning_2nd:'#9a3412', warning_final:'#991b1b', offer_letter:'#166534', experience_letter:'#1e40af', memo:'#475569', policy_manual:'#134e4a' }
                       return (
                         <tr key={l.id}>
                           <td style={{fontFamily:'monospace',fontSize:12,fontWeight:600,color:'var(--teal)'}}>{l.ref_number}</td>
@@ -386,6 +490,7 @@ export default function WorkerDetailPage() {
                               else if (l.letter_type === 'termination_notice') html = terminationWithNoticeHTML(worker, {notice_days:30,last_working_date:'—',reason:l.notes||'—',reason_body:''}, l.ref_number, l.issued_date, l.language)
                               else if (l.letter_type === 'termination_no_notice') { const gk = Object.keys(TERMINATION_GROUNDS_LIST).find(k=>TERMINATION_GROUNDS_LIST[k].label===l.notes)||'misconduct'; html = terminationWithoutNoticeHTML(worker, {ground_key:gk,additional_details:'',effective_date:l.issued_date}, l.ref_number, l.issued_date, l.language) }
                               else if (l.letter_type === 'resignation_acceptance') html = resignationAcceptanceHTML(worker, {resignation_date:'—',last_working_date:'—',notice_period:'60 days'}, l.ref_number, l.issued_date, l.language)
+                              else if (l.letter_type === 'policy_manual') html = policyManualHTML(worker, l.ref_number, l.issued_date)
                               setViewerHtml(html); setViewerRef(l.ref_number)
                             }}>View</button>
                           </td>

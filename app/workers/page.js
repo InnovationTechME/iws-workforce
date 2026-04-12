@@ -5,18 +5,36 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { getWorkers, addWorkerWithC3Task, makeId } from '../../lib/mockStore'
+import { addWorkerWithC3Task, makeId } from '../../lib/mockStore'
+import { getWorkers } from '../../lib/workerService'
 import { formatCurrency, getStatusTone } from '../../lib/utils'
+import { POSITIONS } from '../../data/constants'
 
 export default function WorkersPage() {
   const [workers, setWorkers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [showDrawer, setShowDrawer] = useState(false)
   const [form, setForm] = useState({ full_name:'', trade_role:'', category:'Permanent Staff', nationality:'', passport_number:'', mobile_number:'', email:'', payroll_type:'monthly', monthly_salary:'', hourly_rate:'', fixed_allowance:'', project_site:'', visa_company:'Innovation Technologies', subcontractor_company:'', subcontractor_billing_rate:'', subcontractor_cost_rate:'' })
 
-  useEffect(() => { setWorkers(getWorkers()) }, [])
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true)
+        const data = await getWorkers()
+        setWorkers(data || [])
+      } catch (err) {
+        console.error('Failed to load workers:', err)
+        setWorkers([])
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [])
 
   const filtered = workers.filter(w => {
     const q = search.toLowerCase()
@@ -26,11 +44,11 @@ export default function WorkersPage() {
     return matchSearch && matchCat && matchStatus
   })
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     const seq = String(workers.length + 1).padStart(4, '0')
     const worker = { ...form, id: makeId('w'), worker_number: `IWS-2026-${seq}`, status: 'Pre-employment', active: false, onboarding_status: 'Pre-employment', joining_date: null, leaving_date: null, blacklisted: false, monthly_salary: Number(form.monthly_salary)||0, hourly_rate: Number(form.hourly_rate)||0, fixed_allowance: Number(form.fixed_allowance)||0, subcontractor_billing_rate: Number(form.subcontractor_billing_rate)||0, subcontractor_cost_rate: Number(form.subcontractor_cost_rate)||0, ot_eligible: true, holiday_ot_eligible: true, leave_eligible: true }
     addWorkerWithC3Task(worker)
-    setWorkers(getWorkers())
+    try { setWorkers(await getWorkers() || []) } catch (err) { console.error('Failed to refresh workers:', err) }
     setShowDrawer(false)
     setForm({ full_name:'', trade_role:'', category:'Permanent Staff', nationality:'', passport_number:'', mobile_number:'', email:'', payroll_type:'monthly', monthly_salary:'', hourly_rate:'', fixed_allowance:'', project_site:'', visa_company:'Innovation Technologies', subcontractor_company:'', subcontractor_billing_rate:'', subcontractor_cost_rate:'' })
   }
@@ -44,10 +62,11 @@ export default function WorkersPage() {
         actions={<button className="btn btn-primary" onClick={() => setShowDrawer(true)}>+ Add Worker</button>} />
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(5,minmax(0,1fr))',gap:10,marginBottom:4}}>
-        {[['All',workers.length],['Permanent Staff',workers.filter(w=>w.category==='Permanent Staff').length],['Contract',workers.filter(w=>w.category==='Contract Worker').length],['Subcontract Worker',workers.filter(w=>w.category==='Subcontract Worker').length],['Office Staff',workers.filter(w=>w.category==='Office Staff').length]].map(([label,count]) => (
+        {[['All',workers.filter(w=>w.active!==false).length, workers.filter(w=>w.active===false).length],['Permanent Staff',workers.filter(w=>w.category==='Permanent Staff'&&w.active!==false).length, workers.filter(w=>w.category==='Permanent Staff'&&w.active===false).length],['Contract',workers.filter(w=>w.category==='Contract Worker'&&w.active!==false).length, workers.filter(w=>w.category==='Contract Worker'&&w.active===false).length],['Subcontract Worker',workers.filter(w=>w.category==='Subcontract Worker'&&w.active!==false).length, workers.filter(w=>w.category==='Subcontract Worker'&&w.active===false).length],['Office Staff',workers.filter(w=>w.category==='Office Staff'&&w.active!==false).length, workers.filter(w=>w.category==='Office Staff'&&w.active===false).length]].map(([label,activeCount,inactiveCount]) => (
           <div key={label} className="stat-card" style={{cursor:'pointer'}} onClick={() => setCategoryFilter(label === 'All' ? 'all' : label === 'Contract' ? 'Contract Worker' : label)}>
-            <div className="num" style={{fontSize:20}}>{count}</div>
+            <div className="num teal" style={{fontSize:20}}>{activeCount}</div>
             <div className="lbl">{label}</div>
+            {inactiveCount > 0 && <div style={{fontSize:11,color:'#94a3b8',marginTop:2}}>+ {inactiveCount} inactive on file</div>}
           </div>
         ))}
       </div>
@@ -70,7 +89,7 @@ export default function WorkersPage() {
               <thead><tr><th>Worker</th><th>Role</th><th>Category</th><th>Payroll</th><th>Site</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 {filtered.map(w => (
-                  <tr key={w.id}>
+                  <tr key={w.id} style={{opacity:w.active===false?0.6:1,borderLeft:w.active===false?'3px solid #94a3b8':''}}>
                     <td><div style={{display:'flex',alignItems:'center',gap:8}}><div style={{width:32,height:32,borderRadius:'50%',background:'var(--teal-bg)',border:'1px solid var(--teal-border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:600,color:'var(--teal)',flexShrink:0}}>{w.full_name.split(' ').map(n=>n[0]).join('').slice(0,2)}</div><div><div style={{fontWeight:500}}>{w.full_name}</div><div style={{fontSize:11,color:'var(--hint)'}}>{w.worker_number}</div></div></div></td>
                     <td>{w.trade_role}</td>
                     <td>
@@ -98,7 +117,7 @@ export default function WorkersPage() {
           <div style={{display:'flex',flexDirection:'column',gap:14}}>
             <div className="form-grid">
               <div className="form-field"><label className="form-label">Full name *</label><input className="form-input" value={form.full_name} onChange={e => setForm({...form, full_name:e.target.value})} placeholder="Full name" /></div>
-              <div className="form-field"><label className="form-label">Trade / role *</label><input className="form-input" value={form.trade_role} onChange={e => setForm({...form, trade_role:e.target.value})} placeholder="Welder, Foreman, etc." /></div>
+              <div className="form-field"><label className="form-label">Trade / role *</label><select className="form-select" value={form.trade_role} onChange={e => setForm({...form, trade_role:e.target.value})}><option value="">Select position</option>{POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}</select></div>
               <div className="form-field"><label className="form-label">Category</label><select className="form-select" value={form.category} onChange={e => setForm({...form, category:e.target.value})}>{categories.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
               <div className="form-field"><label className="form-label">Nationality</label><input className="form-input" value={form.nationality} onChange={e => setForm({...form, nationality:e.target.value})} placeholder="Indian, Pakistani, etc." /></div>
               <div className="form-field"><label className="form-label">Passport number</label><input className="form-input" value={form.passport_number} onChange={e => setForm({...form, passport_number:e.target.value})} /></div>

@@ -5,7 +5,8 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { getOffers, addOffer, updateOffer, checkBlacklist, makeId, generateRefNumber, addLetter } from '../../lib/mockStore'
+import { addOffer, updateOffer, checkBlacklist, makeId, generateRefNumber, addLetter } from '../../lib/mockStore'
+import { getOffers } from '../../lib/offerService'
 import { formatCurrency, formatDate, getStatusTone, calculateOTRates } from '../../lib/utils'
 import { NATIONALITIES, POSITIONS } from '../../data/constants'
 import { offerLetterHTML } from '../../lib/letterTemplates'
@@ -19,11 +20,41 @@ export default function OffersPage() {
   const [formErrors, setFormErrors] = useState([])
   const [viewerHtml, setViewerHtml] = useState(null)
   const [viewerRef, setViewerRef] = useState('')
-  const [form, setForm] = useState({ first_name:'', last_name:'', passport_number:'', nationality:'', email:'', trade_role:'', category:'Permanent Staff', employment_type:'Open-ended', pay_type:'monthly', basic_salary_or_rate:'', housing_allowance:'', transport_allowance:'', food_allowance:'', other_allowance:'', start_date:'', valid_until:'', notes:'' })
+  const [form, setForm] = useState({ first_name:'', last_name:'', passport_number:'', passport_expiry:'', nationality:'', email:'', trade_role:'', category:'Permanent Staff', employment_type:'Fixed-term (2 years, renewable)', pay_type:'monthly', basic_salary_or_rate:'', housing_allowance:'', transport_allowance:'', food_allowance:'', other_allowance:'', start_date:'', valid_until:'', notes:'' })
 
-  useEffect(() => { setOffers(getOffers()) }, [])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setLoadError(null)
+      try {
+        const rows = await getOffers()
+        if (!cancelled) setOffers(rows)
+      } catch (err) {
+        if (!cancelled) setLoadError(err?.message || 'Failed to load offers')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const filtered = filter === 'all' ? offers : offers.filter(o => o.offer_status === filter)
+
+  // Passport expiry validation — 7 month minimum for visa
+  const passportExpiryStatus = (() => {
+    if (!form.passport_expiry) return { valid: null, message: 'Passport expiry required — needed for visa eligibility check', tone: 'warning' }
+    const expiry = new Date(form.passport_expiry)
+    const minimum = new Date()
+    minimum.setMonth(minimum.getMonth() + 7)
+    const monthsRemaining = Math.round((expiry - new Date()) / (1000*60*60*24*30.44))
+    if (expiry < minimum) return { valid: false, message: `Passport expires ${formatDate(form.passport_expiry)} — only ${Math.max(0, monthsRemaining)} months remaining. Minimum 7 months required for visa application. This offer cannot proceed.`, tone: 'danger' }
+    return { valid: true, message: `Valid for visa application (${monthsRemaining} months remaining)`, tone: 'success' }
+  })()
+  const passportExpiryBlocked = passportExpiryStatus.valid === false
 
   const basicAmt = Number(form.basic_salary_or_rate) || 0
   const totalPackage = basicAmt + (Number(form.housing_allowance)||0) + (Number(form.transport_allowance)||0) + (Number(form.food_allowance)||0) + (Number(form.other_allowance)||0)
@@ -38,7 +69,7 @@ export default function OffersPage() {
     }
   }
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     const errors = []
     if (!form.first_name?.trim()) errors.push('First name is required')
     if (!form.last_name?.trim()) errors.push('Last name is required')
@@ -46,13 +77,15 @@ export default function OffersPage() {
     if (!form.nationality) errors.push('Nationality is required')
     if (!form.trade_role) errors.push('Position / trade is required')
     if (!basicAmt) errors.push(form.pay_type === 'monthly' ? 'Basic salary is required' : 'Hourly rate is required')
+    if (!form.passport_expiry) errors.push('Passport expiry date is required')
+    if (passportExpiryBlocked) errors.push('Passport expiry too soon for visa application (minimum 7 months required)')
     if (!form.start_date) errors.push('Start date is required')
     if (errors.length > 0) { setFormErrors(errors); return }
     setFormErrors([])
     const fullName = `${form.first_name.trim()} ${form.last_name.trim()}`
     const rates = otRates || { ot125: 0, ot150: 0 }
     const offer = {
-      ...form, id: makeId('off'), offer_status: 'draft', candidate_name: fullName,
+      ...form, id: makeId('off'), offer_status: 'draft', candidate_name: fullName, passport_expiry: form.passport_expiry,
       salary_monthly: form.pay_type === 'monthly' ? basicAmt : 0,
       hourly_rate: form.pay_type === 'hourly' ? basicAmt : 0,
       position: form.trade_role,
@@ -62,11 +95,14 @@ export default function OffersPage() {
       salary_type: form.pay_type, nationality: form.nationality
     }
     addOffer(offer)
-    setOffers(getOffers())
+    try { setOffers(await getOffers()) } catch (err) { setLoadError(err?.message || 'Failed to refresh offers') }
     setShowDrawer(false)
   }
 
-  const handleStatusChange = (id, status) => { updateOffer(id, { offer_status: status }); setOffers(getOffers()) }
+  const handleStatusChange = async (id, status) => {
+    updateOffer(id, { offer_status: status })
+    try { setOffers(await getOffers()) } catch (err) { setLoadError(err?.message || 'Failed to refresh offers') }
+  }
   const statusColors = { draft:'neutral', sent:'info', signed:'success', rescinded:'danger' }
 
   return (
@@ -74,6 +110,10 @@ export default function OffersPage() {
     <AppShell pageTitle="Offers">
       <PageHeader eyebrow="Offers" title="Offer register" description="Create and track offer letters from draft through to signed acceptance."
         actions={<button className="btn btn-primary" onClick={() => setShowDrawer(true)}>+ Create Offer Letter</button>} />
+
+      <div style={{background:'#0d9488',color:'#fff',borderRadius:8,padding:'10px 14px',fontSize:12,lineHeight:1.5,marginBottom:4}}>
+        Offer letters are for Innovation Tech direct staff only (Permanent Staff &amp; Office Staff). To add a Contract Worker or register a Supplier Company Worker, go to <Link href="/onboarding" style={{color:'#fff',textDecoration:'underline',fontWeight:500}}>Onboarding</Link>.
+      </div>
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
         {[['All',offers.length,'neutral'],['Draft',offers.filter(o=>o.offer_status==='draft').length,'neutral'],['Sent',offers.filter(o=>o.offer_status==='sent').length,'info'],['Signed',offers.filter(o=>o.offer_status==='signed').length,'success']].map(([label,count,tone]) => (
@@ -93,7 +133,7 @@ export default function OffersPage() {
         </div>
         {filtered.length === 0 ? <div className="empty-state"><h3>No offers yet</h3><p>Create your first offer letter to get started.</p></div> : (
           <div className="table-wrap"><table>
-            <thead><tr><th>Candidate</th><th>Position</th><th>Category</th><th>Compensation</th><th>Valid until</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Candidate</th><th>Position</th><th>Category</th><th>Compensation</th><th>Passport Expiry</th><th>Valid until</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {filtered.map(o => (
                 <tr key={o.id}>
@@ -101,6 +141,13 @@ export default function OffersPage() {
                   <td>{o.position}</td>
                   <td><StatusBadge label={o.category} tone="neutral" /></td>
                   <td><div style={{fontSize:12}}>{o.salary_type === 'monthly' ? formatCurrency(o.salary_monthly) + '/mo' : formatCurrency(o.hourly_rate) + '/hr'}</div></td>
+                  <td>{(() => {
+                    if (!o.passport_expiry) return <span style={{fontSize:11,color:'var(--hint)'}}>—</span>
+                    const exp = new Date(o.passport_expiry)
+                    const months = Math.round((exp - new Date()) / (1000*60*60*24*30.44))
+                    const tone = months < 7 ? 'danger' : months < 12 ? 'warning' : 'success'
+                    return <StatusBadge label={`${formatDate(o.passport_expiry)} (${months}mo)`} tone={tone} />
+                  })()}</td>
                   <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(o.validity_date || o.valid_until)}</td>
                   <td><StatusBadge label={o.offer_status} tone={statusColors[o.offer_status]||'neutral'} /></td>
                   <td>
@@ -130,7 +177,7 @@ export default function OffersPage() {
 
       {showDrawer && (
         <DrawerForm title="Create Offer Letter" subtitle="Draft a new offer for a candidate" onClose={() => { setShowDrawer(false); setFormErrors([]) }}
-          footer={<div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary" onClick={() => { setShowDrawer(false); setFormErrors([]) }}>Cancel</button><button className="btn btn-primary" onClick={handleCreate} disabled={!!blacklistWarning}>Create Offer</button></div>}>
+          footer={<div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary" onClick={() => { setShowDrawer(false); setFormErrors([]) }}>Cancel</button><button className="btn btn-primary" onClick={handleCreate} disabled={!!blacklistWarning || passportExpiryBlocked} title={passportExpiryBlocked ? 'Passport expiry too soon for visa application' : ''}>Create Offer</button></div>}>
           <div style={{display:'flex',flexDirection:'column',gap:14}}>
             {formErrors.length > 0 && <div style={{background:'#fef2f2',border:'1px solid var(--danger)',borderRadius:6,padding:'10px 12px',display:'flex',flexDirection:'column',gap:4}}>{formErrors.map(e => <div key={e} style={{color:'var(--danger)',fontSize:12}}>⚠ {e}</div>)}</div>}
             {blacklistWarning && <div className="notice danger"><strong>Blacklist match:</strong> {blacklistWarning.full_name} — {blacklistWarning.reason}</div>}
@@ -138,11 +185,18 @@ export default function OffersPage() {
               <div className="form-field"><label className="form-label">First name *</label><input className="form-input" value={form.first_name} onChange={e => setForm({...form, first_name:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Last name *</label><input className="form-input" value={form.last_name} onChange={e => setForm({...form, last_name:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Passport number *</label><input className="form-input" value={form.passport_number} onChange={e => handlePassportCheck(e.target.value)} placeholder="Auto-checks blacklist" /></div>
+              <div className="form-field">
+                <label className="form-label">Passport expiry date *</label>
+                <input className="form-input" type="date" value={form.passport_expiry} onChange={e => setForm({...form, passport_expiry:e.target.value})} style={passportExpiryBlocked ? {borderColor:'var(--danger)'} : {}} />
+                {passportExpiryStatus.tone === 'danger' && <div style={{marginTop:4,padding:'6px 10px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:4,fontSize:11,color:'var(--danger)'}}>⚠ {passportExpiryStatus.message}</div>}
+                {passportExpiryStatus.tone === 'success' && <div style={{marginTop:4,fontSize:11,color:'var(--success)',fontWeight:500}}>✓ {passportExpiryStatus.message}</div>}
+                {passportExpiryStatus.tone === 'warning' && <div style={{marginTop:4,fontSize:11,color:'var(--warning)'}}>⚠ {passportExpiryStatus.message}</div>}
+              </div>
               <div className="form-field"><label className="form-label">Nationality *</label><select className="form-select" value={form.nationality} onChange={e => setForm({...form, nationality:e.target.value})}><option value="">Select nationality</option>{NATIONALITIES.map(n => <option key={n} value={n}>{n}</option>)}</select></div>
               <div className="form-field"><label className="form-label">Email</label><input className="form-input" value={form.email} onChange={e => setForm({...form, email:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Position / Trade *</label><select className="form-select" value={form.trade_role} onChange={e => setForm({...form, trade_role:e.target.value})}><option value="">Select position</option>{POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}</select></div>
-              <div className="form-field"><label className="form-label">Category</label><select className="form-select" value={form.category} onChange={e => setForm({...form, category:e.target.value})}>{['Permanent Staff','Contract Worker','Subcontract Worker','Office Staff'].map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-              <div className="form-field"><label className="form-label">Employment type</label><select className="form-select" value={form.employment_type} onChange={e => setForm({...form, employment_type:e.target.value})}><option value="Open-ended">Open-ended</option><option value="Fixed-term">Fixed-term</option></select></div>
+              <div className="form-field"><label className="form-label">Category</label><select className="form-select" value={form.category} onChange={e => setForm({...form, category:e.target.value})}>{['Permanent Staff','Office Staff'].map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+              <div className="form-field"><label className="form-label">Employment type</label><select className="form-select" value={form.employment_type} onChange={e => setForm({...form, employment_type:e.target.value})}><option value="Fixed-term (2 years, renewable)">Fixed-term (2 years, renewable)</option></select></div>
               <div className="form-field"><label className="form-label">Pay type</label><select className="form-select" value={form.pay_type} onChange={e => setForm({...form, pay_type:e.target.value})}><option value="monthly">Monthly salary</option><option value="hourly">Hourly rate</option></select></div>
               <div className="form-field"><label className="form-label">{form.pay_type === 'monthly' ? 'Basic salary (AED) *' : 'Hourly rate (AED) *'}</label><input className="form-input" type="number" value={form.basic_salary_or_rate} onChange={e => setForm({...form, basic_salary_or_rate:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Start date *</label><input className="form-input" type="date" value={form.start_date} onChange={e => setForm({...form, start_date:e.target.value})} /></div>

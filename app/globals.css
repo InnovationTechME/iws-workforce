@@ -175,3 +175,15 @@ tr:hover td { background: #fafcff; }
   .form-grid, .form-grid-3 { grid-template-columns: 1fr; }
   .page-shell { padding: 16px; }
 }
+
+@media print {
+  @page { size: A3 landscape; margin: 8mm; }
+  body.printing-timesheet * { visibility: hidden; }
+  body.printing-timesheet #timesheet-print-area,
+  body.printing-timesheet #timesheet-print-area * { visibility: visible; }
+  body.printing-timesheet #timesheet-print-area { position: fixed; top: 0; left: 0; width: 100%; background: white; font-size: 7pt; }
+  body.printing-timesheet th, body.printing-timesheet td { position: static !important; border: 0.5pt solid #ccc !important; padding: 2px 3px !important; white-space: nowrap; }
+  body.printing-timesheet #timesheet-print-area::before { content: attr(data-month) " — Innovation Technologies LLC O.P.C. — Monthly Timesheet"; display: block; font-size: 10pt; font-weight: bold; padding-bottom: 4mm; visibility: visible; color: black; }
+  body.printing-timesheet #timesheet-print-area::after { content: "Licence: CN-5087790 · MOHRE: 1979124 · Generated: " attr(data-generated) " · CONFIDENTIAL"; display: block; font-size: 6pt; color: #666; padding-top: 4mm; visibility: visible; }
+  .no-print { display: none !important; }
+}

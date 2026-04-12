@@ -12,6 +12,7 @@ const navSections = [
     { href:'/offers', label:'Offers', module:'offers' },
     { href:'/onboarding', label:'Onboarding', module:'onboarding' },
     { href:'/workers', label:'Workers', module:'workers' },
+    { href:'/suppliers', label:'Suppliers', module:'suppliers' },
     { href:'/offboarding-exit', label:'Worker Exit', module:'offboarding-exit' },
     { href:'/blacklist', label:'Blacklist', module:'blacklist' },
   ]},
@@ -29,6 +30,7 @@ const navSections = [
   { title:'TIMESHEETS & PAYROLL', items:[
     { href:'/timesheets', label:'Timesheets', module:'timesheets' },
     { href:'/timesheet-reconcile', label:'Reconciliation', module:'timesheet-reconcile' },
+    { href:'/payroll-run', label:'⚡ Run Payroll', module:'payroll-run' },
     { href:'/payroll', label:'Payroll', module:'payroll' },
     { href:'/payroll-settings', label:'Payroll Settings', module:'payroll-settings' },
   ]},
@@ -44,7 +46,7 @@ export default function Sidebar({ alertDots = {} }) {
 
   useEffect(() => { setMounted(true); setRoleState(getRole()) }, [])
 
-  const roleLabel = role === 'owner' ? 'Owner' : role === 'hr_admin' ? 'HR Admin' : 'Operations'
+  const roleLabel = role === 'owner' ? 'Management' : role === 'hr_admin' ? 'HR Admin' : 'Operations'
 
   return (
     <aside className="sidebar">
