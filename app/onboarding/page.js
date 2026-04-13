@@ -59,7 +59,11 @@ function emptyForm(track) {
     monthly_salary: '', hourly_rate: '',
     food_allowance: '', housing_allowance: '', transport_allowance: '', other_allowance: '',
     joining_date: '',
-    supplier_id: '', supplier_rate: ''
+    supplier_id: '', supplier_rate: '',
+    email: '', whatsapp_number: '',
+    emirates_id: '', emirates_id_expiry: '',
+    visa_number: '', visa_expiry: '',
+    health_insurance_provider: '', health_insurance_expiry: ''
   }
 }
 
@@ -174,6 +178,19 @@ export default function OnboardingPage() {
       if (!form.supplier_id) errs.push('Supplier company is required')
       if (!form.supplier_rate) errs.push('Agreed hourly rate is required')
     }
+
+    const today = new Date().toISOString().split('T')[0]
+    if (selectedTrack === 'direct_staff' || selectedTrack === 'contract_worker') {
+      if (!form.emirates_id?.trim()) errs.push('Emirates ID number is required')
+      if (!form.emirates_id_expiry) errs.push('Emirates ID expiry is required')
+      else if (form.emirates_id_expiry <= today) errs.push('Emirates ID expiry must be a future date')
+    }
+    if (!form.visa_number?.trim()) errs.push('UAE Visa number is required')
+    if (!form.visa_expiry) errs.push('UAE Visa expiry is required')
+    else if (form.visa_expiry <= today) errs.push('UAE Visa expiry must be a future date')
+    if (form.health_insurance_expiry && form.health_insurance_expiry <= today) {
+      errs.push('Health insurance expiry must be a future date')
+    }
     return errs
   }
 
@@ -199,6 +216,12 @@ export default function OnboardingPage() {
         status: 'onboarding',
         entry_track: selectedTrack,
         joining_date: form.joining_date || null,
+        email: form.email?.trim() || null,
+        whatsapp_number: form.whatsapp_number?.trim() || null,
+        emirates_id: form.emirates_id?.trim() || null,
+        emirates_id_expiry: form.emirates_id_expiry || null,
+        visa_number: form.visa_number?.trim() || null,
+        visa_expiry: form.visa_expiry || null,
       }
 
       let payload
@@ -219,7 +242,9 @@ export default function OnboardingPage() {
           hourly_rate: parseFloat(form.hourly_rate) || null,
           food_allowance: 0,
           other_allowance: 0,
-          payment_method: 'WPS'
+          payment_method: 'WPS',
+          health_insurance_provider: form.health_insurance_provider?.trim() || null,
+          health_insurance_expiry: form.health_insurance_expiry || null,
         }
       } else {
         payload = {
@@ -228,7 +253,9 @@ export default function OnboardingPage() {
           subcontractor_type: 'invoice',
           supplier_id: form.supplier_id,
           supplier_rate: parseFloat(form.supplier_rate) || null,
-          payment_method: 'Non-WPS'
+          payment_method: 'Non-WPS',
+          health_insurance_provider: form.health_insurance_provider?.trim() || null,
+          health_insurance_expiry: form.health_insurance_expiry || null,
         }
       }
 
@@ -264,6 +291,18 @@ export default function OnboardingPage() {
 
       await initialiseWorkerDocuments(created, supabase)
       await upsertOnboarding(created.id, { created_at: new Date().toISOString() })
+
+      const docUpdates = []
+      if (form.emirates_id_expiry) {
+        docUpdates.push(supabase.from('documents').update({ expiry_date: form.emirates_id_expiry, updated_at: new Date().toISOString() }).eq('worker_id', created.id).eq('doc_type', 'emirates_id'))
+      }
+      if (form.visa_expiry) {
+        docUpdates.push(supabase.from('documents').update({ expiry_date: form.visa_expiry, updated_at: new Date().toISOString() }).eq('worker_id', created.id).eq('doc_type', 'uae_visa'))
+      }
+      if (form.health_insurance_expiry) {
+        docUpdates.push(supabase.from('documents').update({ expiry_date: form.health_insurance_expiry, updated_at: new Date().toISOString() }).eq('worker_id', created.id).eq('doc_type', 'health_insurance'))
+      }
+      if (docUpdates.length) await Promise.all(docUpdates)
 
       if (selectedTrack === 'contract_worker') {
         await supabase.from('tasks').insert([{
@@ -602,6 +641,49 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
           </div>
           <div className="form-field"><label className="form-label">Expected site start date</label>
             <input className="form-input" type="date" value={form.joining_date} onChange={e => set('joining_date', e.target.value)} />
+          </div>
+        </>}
+      </div>
+
+      <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginTop:4}}>Contact</div>
+      <div className="form-grid">
+        <div className="form-field">
+          <label className="form-label">Email address</label>
+          <input className="form-input" type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="worker@example.com" />
+        </div>
+        <div className="form-field">
+          <label className="form-label">WhatsApp number</label>
+          <input className="form-input" type="tel" value={form.whatsapp_number} onChange={e => set('whatsapp_number', e.target.value)} placeholder="+971 50 123 4567" />
+        </div>
+      </div>
+
+      <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginTop:4}}>Document Details</div>
+      <div className="form-grid">
+        <div className="form-field">
+          <label className="form-label">Emirates ID Number {track !== 'subcontractor_company_worker' && '*'}</label>
+          <input className="form-input" type="text" value={form.emirates_id} onChange={e => set('emirates_id', e.target.value)} placeholder="784-XXXX-XXXXXXX-X" />
+        </div>
+        <div className="form-field">
+          <label className="form-label">Emirates ID Expiry {track !== 'subcontractor_company_worker' && '*'}</label>
+          <input className="form-input" type="date" value={form.emirates_id_expiry} min={new Date(Date.now()+86400000).toISOString().split('T')[0]} onChange={e => set('emirates_id_expiry', e.target.value)} />
+        </div>
+        <div className="form-field">
+          <label className="form-label">UAE Visa Number *</label>
+          <input className="form-input" type="text" value={form.visa_number} onChange={e => set('visa_number', e.target.value)} placeholder="e.g. 101/2026/XXXXXXX" />
+        </div>
+        <div className="form-field">
+          <label className="form-label">UAE Visa Expiry *</label>
+          <input className="form-input" type="date" value={form.visa_expiry} min={new Date(Date.now()+86400000).toISOString().split('T')[0]} onChange={e => set('visa_expiry', e.target.value)} />
+        </div>
+        {(track === 'contract_worker' || track === 'subcontractor_company_worker') && <>
+          <div className="form-field">
+            <label className="form-label">Health Insurance Provider</label>
+            <input className="form-input" type="text" value={form.health_insurance_provider} onChange={e => set('health_insurance_provider', e.target.value)} placeholder="e.g. AXA, Daman, Oman Insurance" />
+          </div>
+          <div className="form-field">
+            <label className="form-label">Health Insurance Expiry</label>
+            <input className="form-input" type="date" value={form.health_insurance_expiry} min={new Date(Date.now()+86400000).toISOString().split('T')[0]} onChange={e => set('health_insurance_expiry', e.target.value)} />
+            {!form.health_insurance_expiry && <div style={{fontSize:11,color:'#b45309',marginTop:4}}>Adding insurance expiry enables automatic renewal alerts</div>}
           </div>
         </>}
       </div>

@@ -8,6 +8,28 @@ import { getPackCoverage, getDocuments, getVisibleWorkers, getCertifications, ge
 import { formatDate, getStatusTone } from '../../lib/utils'
 import { PACK_DOCUMENT_TYPES } from '../../data/constants'
 
+const DOC_LABELS = {
+  passport: 'Passport Copy',
+  passport_copy: 'Passport Copy',
+  photo: 'Passport Photo',
+  passport_photo: 'Passport Photo',
+  uae_visa: 'UAE Visa',
+  visa: 'UAE Visa',
+  emirates_id: 'Emirates ID',
+  workers_compensation: "Workmen's Compensation",
+  workmen_compensation: "Workmen's Compensation",
+  health_insurance: 'Health Insurance',
+  medical_insurance: 'Health Insurance',
+  medical_fitness: 'Medical Certificate',
+  labour_card: 'Labour Card',
+  offer_letter: 'Offer Letter',
+  employment_contract: 'Contract',
+  iloe_certificate: 'ILOE Certificate',
+  worker_policy_manual: 'Policy Manual',
+  health_card: 'Health Card',
+}
+const labelFor = (t) => DOC_LABELS[t] || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
 // Standard documents always auto-included in a pack (cover page is generated, not stored)
 const STANDARD_PACK_DOCS = [
   { key:'passport', label:'Passport Copy' },
@@ -167,7 +189,7 @@ export default function PacksPage() {
                   <td><StatusBadge label={p.category} tone="neutral" /></td>
                   <td>{isInactive ? <StatusBadge label="Inactive" tone="neutral" /> : <StatusBadge label={p.available_count===p.required_count?'Ready':'Blocked'} tone={p.available_count===p.required_count?'success':'danger'} />}</td>
                   <td><div style={{display:'flex',alignItems:'center',gap:8}}><div style={{flex:1,height:4,background:'var(--border)',borderRadius:2}}><div style={{width:`${Math.min((p.available_count/p.required_count)*100,100)}%`,height:'100%',background:p.available_count===p.required_count?'var(--success)':'var(--warning)',borderRadius:2}}/></div><span style={{fontSize:11,color:'var(--muted)',whiteSpace:'nowrap'}}>{p.available_count}/{p.required_count}</span></div></td>
-                  <td style={{fontSize:12,color:'var(--danger)'}}>{p.missing_types?.join(', ')||'—'}</td>
+                  <td style={{fontSize:12,color:'var(--danger)'}}>{p.missing_types?.length ? p.missing_types.map(labelFor).join(', ') : '—'}</td>
                   <td><button className="btn btn-teal btn-sm" onClick={()=>openPackBuilder(p.worker_id)}>📦 Select &amp; Build</button></td>
                 </tr>)
               })}

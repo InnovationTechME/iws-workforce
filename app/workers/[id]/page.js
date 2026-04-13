@@ -159,12 +159,41 @@ export default function WorkerDetailPage() {
         {tab === 'profile' && (
           <div>
             <div className="form-grid">
-              {[['Full name',worker.full_name],['Worker number',worker.worker_number],['Category',worker.category],['Trade / role',worker.trade_role],['Nationality',worker.nationality],['Passport',worker.passport_number],['Date of birth',worker.date_of_birth||'—'],['Passport expiry',formatDate(worker.passport_expiry)],['Emirates ID',worker.emirates_id||'—'],['EID expiry',formatDate(worker.emirates_id_expiry)],['Mobile',worker.mobile_number],['WhatsApp',worker.whatsapp_number||'—'],['Email',worker.email],['Visa company',worker.visa_company],['Visa number',worker.visa_number||'—'],['Project site',worker.project_site],['Joining date',formatDate(worker.joining_date)],['Onboarding status',worker.onboarding_status]].map(([label,value]) => (
+              {[['Full name',worker.full_name],['Worker number',worker.worker_number],['Category',worker.category],['Trade / role',worker.trade_role],['Nationality',worker.nationality],['Passport',worker.passport_number],['Date of birth',worker.date_of_birth||'—'],['Passport expiry',formatDate(worker.passport_expiry)],['Emirates ID',worker.emirates_id||'—'],['EID expiry',formatDate(worker.emirates_id_expiry)],['Mobile',worker.mobile_number],['Visa company',worker.visa_company],['Visa number',worker.visa_number||'—'],['Project site',worker.project_site],['Joining date',formatDate(worker.joining_date)]].map(([label,value]) => (
                 <div key={label}>
                   <div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>{label}</div>
                   <div style={{fontSize:13,fontWeight:500}}>{value || '—'}</div>
                 </div>
               ))}
+              <div>
+                <div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Email</div>
+                <div style={{fontSize:13,fontWeight:500}}>
+                  {worker.email ? <a href={`mailto:${worker.email}`} style={{color:'#0d9488'}}>{worker.email}</a> : '—'}
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>WhatsApp</div>
+                <div style={{fontSize:13,fontWeight:500}}>
+                  {worker.whatsapp_number ? <a href={`https://wa.me/${worker.whatsapp_number.replace(/\D/g,'')}`} target="_blank" rel="noreferrer" style={{color:'#0d9488'}}>{worker.whatsapp_number}</a> : '—'}
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Status</div>
+                <div style={{fontSize:13,fontWeight:500}}>
+                  {(() => {
+                    const s = worker.status || 'onboarding'
+                    const map = {
+                      active: { label: 'Active', bg:'#dcfce7', color:'#166534', border:'#86efac' },
+                      onboarding: { label: 'In Onboarding', bg:'#fef3c7', color:'#92400e', border:'#fde68a' },
+                      on_leave: { label: 'On Leave', bg:'#dbeafe', color:'#1e40af', border:'#93c5fd' },
+                      offboarding: { label: 'Offboarding', bg:'#fee2e2', color:'#991b1b', border:'#fecaca' },
+                      inactive: { label: 'Inactive', bg:'#f1f5f9', color:'#475569', border:'#cbd5e1' }
+                    }
+                    const v = map[s] || { label: s, bg:'#f1f5f9', color:'#475569', border:'#cbd5e1' }
+                    return <span style={{fontSize:11,fontWeight:600,background:v.bg,color:v.color,border:`1px solid ${v.border}`,padding:'2px 10px',borderRadius:10}}>{v.label}</span>
+                  })()}
+                </div>
+              </div>
             </div>
             {worker.category === 'Subcontract Worker' && <div className="form-grid" style={{marginTop:12}}>
               <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Subcontractor company</div><div style={{fontSize:13,fontWeight:500}}>{worker.subcontractor_company || '—'}</div></div>
@@ -183,14 +212,23 @@ export default function WorkerDetailPage() {
                   <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (weekday 125%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.monthly_salary / 26 / 8 * 1.25).toFixed(2)}/hr</div></div>
                   <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (Friday 150%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.monthly_salary / 26 / 8 * 1.5).toFixed(2)}/hr</div></div>
                 </div>
-              ) : (
-                <div className="form-grid">
-                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Hourly rate</div><div style={{fontSize:13,fontWeight:600}}>{formatCurrency(worker.hourly_rate)}/hr</div></div>
-                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (125%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.hourly_rate * 1.25).toFixed(2)}/hr</div></div>
-                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (150%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.hourly_rate * 1.5).toFixed(2)}/hr</div></div>
-                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Est. monthly (208 hrs)</div><div style={{fontSize:13,fontWeight:500}}>{formatCurrency(worker.hourly_rate * 208)}</div></div>
-                </div>
-              )}
+              ) : (() => {
+                const flatRate = worker.entry_track === 'contract_worker' || worker.entry_track === 'subcontractor_company_worker'
+                return (
+                  <div className="form-grid">
+                    <div>
+                      <div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Hourly rate</div>
+                      <div style={{fontSize:13,fontWeight:600}}>{formatCurrency(worker.hourly_rate)}/hr</div>
+                      {flatRate && <div style={{fontSize:10,color:'var(--hint)',fontStyle:'italic',marginTop:2}}>Flat rate — no overtime premium applies</div>}
+                    </div>
+                    {!flatRate && <>
+                      <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (125%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.hourly_rate * 1.25).toFixed(2)}/hr</div></div>
+                      <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (150%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.hourly_rate * 1.5).toFixed(2)}/hr</div></div>
+                      <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Est. monthly (208 hrs)</div><div style={{fontSize:13,fontWeight:500}}>{formatCurrency(worker.hourly_rate * 208)}</div></div>
+                    </>}
+                  </div>
+                )
+              })()}
             </div>
             {/* Leave Balance */}
             {(() => { const lb = calculateLeaveBalance(worker.id); if (!lb) return null; return (
