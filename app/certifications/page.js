@@ -4,8 +4,8 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { addCertification, updateCertification, getVisibleWorkers, makeId, getWorkerDisplay, getWorker } from '../../lib/mockStore'
-import { getExpiringCertifications } from '../../lib/certificationService'
+import { getAllCertificationsWithWorkers, addCertification, updateCertification } from '../../lib/certificationService'
+import { getVisibleWorkers } from '../../lib/workerService'
 import { formatDate, getStatusTone, validateRequired, validateDateNotPast, TODAY } from '../../lib/utils'
 
 const CERT_TYPES = ['Working at Height','H2S Awareness','Confined Space Entry','First Aid','Welding Certificate','Rigger/Banksman','Scaffolder','Forklift Operator','IPAF/MEWP','Electrician Licence','BOSIET/HUET','Safety Officer','HSE Officer','Custom']
@@ -17,17 +17,40 @@ export default function CertificationsPage() {
   const [showDrawer, setShowDrawer] = useState(false)
   const [formErrors, setFormErrors] = useState([])
   const [formWarnings, setFormWarnings] = useState([])
-  const [form, setForm] = useState({ worker_id:'', certification_type:'Working at Height', issuer:'', issue_date:'', expiry_date:'', renewal_required:false, file_name:null })
+  const [form, setForm] = useState({ worker_id:'', cert_type:'Working at Height', cert_number:'', issuer:'', issue_date:'', expiry_date:'', renewal_required:false, file_name:null })
   const [selectedCert, setSelectedCert] = useState(null)
   const [renewForm, setRenewForm] = useState({ issuer:'', issue_date:'', expiry_date:'', file_name:null })
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
 
+  const today = new Date(); today.setHours(0,0,0,0)
+  const computeStatus = (expiry) => {
+    if (!expiry) return 'valid'
+    const days = Math.ceil((new Date(expiry) - today) / (1000*60*60*24))
+    if (days < 0) return 'expired'
+    if (days <= 30) return 'expiring_soon'
+    return 'valid'
+  }
+
   const reloadCerts = async () => {
-    setWorkers(getVisibleWorkers())
-    const rows = await getExpiringCertifications(9999)
-    setCerts(rows || [])
+    const [ws, rows] = await Promise.all([getVisibleWorkers(), getAllCertificationsWithWorkers()])
+    setWorkers(ws)
+    const normalised = (rows || []).map(c => ({
+      ...c,
+      certification_type: c.cert_type,
+      status: c.status || computeStatus(c.expiry_date),
+    }))
+    setCerts(normalised)
+  }
+
+  const workerDisplay = (wid) => {
+    const w = certs.find(c => c.worker_id === wid)?.workers || workers.find(x => x.id === wid)
+    return { name_primary: w?.full_name || 'Unknown', id_secondary: w?.worker_number || '—' }
+  }
+  const isInactive = (wid) => {
+    const w = certs.find(c => c.worker_id === wid)?.workers || workers.find(x => x.id === wid)
+    return w?.status === 'inactive'
   }
 
   useEffect(() => {
@@ -50,22 +73,40 @@ export default function CertificationsPage() {
   const current = queues[queue] || []
 
   const handleAdd = async () => {
-    const errors = validateRequired([{value:form.worker_id,label:'Worker'},{value:form.certification_type,label:'Certification type'},{value:form.expiry_date,label:'Expiry date'}])
+    const errors = validateRequired([{value:form.worker_id,label:'Worker'},{value:form.cert_type,label:'Certification type'},{value:form.expiry_date,label:'Expiry date'}])
     if (errors.length > 0) { setFormErrors(errors); return }
     setFormErrors([])
-    addCertification({ ...form, id:makeId('cert'), status:'valid', file_url:null })
-    try { await reloadCerts() } catch (err) { setLoadError(err?.message || 'Failed to refresh certifications') }
-    setShowDrawer(false)
+    try {
+      await addCertification({
+        worker_id: form.worker_id,
+        cert_type: form.cert_type,
+        cert_number: form.cert_number || null,
+        issuer: form.issuer || null,
+        issue_date: form.issue_date || null,
+        expiry_date: form.expiry_date || null,
+        renewal_required: !!form.renewal_required,
+        file_url: form.file_name || null,
+        status: computeStatus(form.expiry_date)
+      })
+      await reloadCerts()
+      setShowDrawer(false)
+      setForm({ worker_id:'', cert_type:'Working at Height', cert_number:'', issuer:'', issue_date:'', expiry_date:'', renewal_required:false, file_name:null })
+    } catch (err) { setLoadError(err?.message || 'Failed to add certification') }
   }
 
   const handleRenew = async () => {
     if (!renewForm.expiry_date) { alert('Expiry date is required'); return }
-    const exp = new Date(renewForm.expiry_date)
-    const today = new Date()
-    const daysUntil = Math.ceil((exp - today) / (1000*60*60*24))
-    const newStatus = daysUntil < 0 ? 'expired' : daysUntil <= 30 ? 'expiring_soon' : 'valid'
-    updateCertification(selectedCert.id, { issuer:renewForm.issuer, issue_date:renewForm.issue_date, expiry_date:renewForm.expiry_date, file_name:renewForm.file_name, renewal_required:false, status:newStatus })
-    try { await reloadCerts() } catch (err) { setLoadError(err?.message || 'Failed to refresh certifications') }
+    try {
+      await updateCertification(selectedCert.id, {
+        issuer: renewForm.issuer || null,
+        issue_date: renewForm.issue_date || null,
+        expiry_date: renewForm.expiry_date || null,
+        file_url: renewForm.file_name || null,
+        renewal_required: false,
+        status: computeStatus(renewForm.expiry_date)
+      })
+      await reloadCerts()
+    } catch (err) { setLoadError(err?.message || 'Failed to renew certification') }
     setSelectedCert(null)
   }
 
@@ -100,12 +141,12 @@ export default function CertificationsPage() {
             <thead><tr><th>Worker</th><th>Certification</th><th>Issuer</th><th>Expiry</th><th>Renewal</th><th>Status</th><th></th></tr></thead>
             <tbody>
               {current.map(c => {
-                const wi = getWorkerDisplay(c.worker_id)
+                const wi = workerDisplay(c.worker_id)
                 const exp = c.expiry_date ? new Date(c.expiry_date) : null
                 const daysUntil = exp ? Math.ceil((exp - new Date()) / (1000*60*60*24)) : null
                 return (
                 <tr key={c.id} style={{cursor:'pointer'}} onClick={() => openRenewDrawer(c)}>
-                  <td><div style={{fontWeight:500,color:'var(--teal)',display:'flex',alignItems:'center',gap:6}}>{wi.name_primary}{getWorker(c.worker_id)?.active===false && <span style={{fontSize:10,fontWeight:600,color:'#64748b',background:'#e2e8f0',borderRadius:10,padding:'1px 6px'}}>Inactive</span>}</div><div style={{fontSize:11,color:'var(--hint)'}}>{wi.id_secondary}</div></td>
+                  <td><div style={{fontWeight:500,color:'var(--teal)',display:'flex',alignItems:'center',gap:6}}>{wi.name_primary}{isInactive(c.worker_id) && <span style={{fontSize:10,fontWeight:600,color:'#64748b',background:'#e2e8f0',borderRadius:10,padding:'1px 6px'}}>Inactive</span>}</div><div style={{fontSize:11,color:'var(--hint)'}}>{wi.id_secondary}</div></td>
                   <td style={{fontWeight:500}}>{c.certification_type}</td>
                   <td style={{fontSize:12,color:'var(--muted)'}}>{c.issuer}</td>
                   <td style={{fontSize:12,color:c.status==='expired'?'var(--danger)':c.status==='expiring_soon'?'var(--warning)':'var(--muted)'}}>{formatDate(c.expiry_date)}{daysUntil !== null && <div style={{fontSize:10,color:daysUntil<0?'var(--danger)':daysUntil<=30?'var(--warning)':'var(--hint)'}}>{daysUntil < 0 ? Math.abs(daysUntil)+' days overdue' : daysUntil+' days left'}</div>}</td>
@@ -126,7 +167,8 @@ export default function CertificationsPage() {
             {formErrors.length > 0 && <div style={{background:'#fef2f2',border:'1px solid var(--danger)',borderRadius:6,padding:'10px 12px'}}>{formErrors.map(e => <div key={e} style={{color:'var(--danger)',fontSize:12}}>⚠ {e}</div>)}</div>}
             <div className="form-grid">
               <div className="form-field"><label className="form-label">Worker *</label><select className="form-select" value={form.worker_id} onChange={e => setForm({...form,worker_id:e.target.value})}><option value="">Select worker</option>{workers.map(w=><option key={w.id} value={w.id}>{w.full_name} ({w.worker_number})</option>)}</select></div>
-              <div className="form-field"><label className="form-label">Certification type *</label><select className="form-select" value={form.certification_type} onChange={e => setForm({...form,certification_type:e.target.value})}>{CERT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+              <div className="form-field"><label className="form-label">Certification type *</label><select className="form-select" value={form.cert_type} onChange={e => setForm({...form,cert_type:e.target.value})}>{CERT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+              <div className="form-field"><label className="form-label">Certificate number</label><input className="form-input" value={form.cert_number} onChange={e => setForm({...form,cert_number:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Issuer</label><input className="form-input" value={form.issuer} onChange={e => setForm({...form,issuer:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Issue date</label><input className="form-input" type="date" value={form.issue_date} onChange={e => setForm({...form,issue_date:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Expiry date *</label><input className="form-input" type="date" value={form.expiry_date} onChange={e => setForm({...form,expiry_date:e.target.value})} /></div>

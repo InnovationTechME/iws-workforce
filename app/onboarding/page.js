@@ -10,6 +10,7 @@ import { addWorker, updateWorker, getNextWorkerNumber } from '../../lib/workerSe
 import { getSuppliers, getSupplierRates } from '../../lib/supplierService'
 import { checkBlacklist } from '../../lib/blacklistService'
 import { getDocumentTemplate, initialiseWorkerDocuments } from '../../lib/documentRegister'
+import DocumentUploadForm from '../../components/DocumentUploadForm'
 import { NATIONALITIES, POSITIONS } from '../../data/constants'
 import { formatDate } from '../../lib/utils'
 
@@ -42,9 +43,11 @@ function sevenMonthsFromNow() {
   return d
 }
 
-function passportExpiryValid(dateStr) {
+function passportExpiryValid(dateStr, months = 7) {
   if (!dateStr) return false
-  return new Date(dateStr) >= sevenMonthsFromNow()
+  const d = new Date()
+  d.setMonth(d.getMonth() + months)
+  return new Date(dateStr) >= d
 }
 
 function emptyForm(track) {
@@ -144,15 +147,28 @@ export default function OnboardingPage() {
     if (!form.nationality) errs.push('Nationality is required')
     if (!form.passport_number?.trim()) errs.push('Passport number is required')
     if (!form.passport_expiry) errs.push('Passport expiry is required')
-    else if (selectedTrack !== 'subcontractor_company_worker' && !passportExpiryValid(form.passport_expiry)) {
-      errs.push('Passport must be valid for at least 7 more months')
+    else {
+      const minMonths = selectedTrack === 'direct_staff' ? 7 : 1
+      if (!passportExpiryValid(form.passport_expiry, minMonths)) {
+        errs.push(`Passport must be valid for at least ${minMonths} more month${minMonths > 1 ? 's' : ''}`)
+      }
     }
     if (!form.trade_role) errs.push('Position / trade is required')
     if (selectedTrack === 'direct_staff') {
       if (!form.monthly_salary) errs.push('Monthly salary is required')
     }
     if (selectedTrack === 'contract_worker') {
+      const rate = parseFloat(form.hourly_rate)
       if (!form.hourly_rate) errs.push('Hourly rate is required')
+      else if (rate < 9) errs.push('Hourly rate cannot be below AED 9/hr')
+      else if (rate > 23) errs.push('Hourly rate cannot exceed AED 23/hr — check with management if higher rate needed')
+    }
+    if (selectedTrack === 'contract_worker' && form.joining_date) {
+      const maxDate = new Date()
+      maxDate.setDate(maxDate.getDate() + 14)
+      if (new Date(form.joining_date) > maxDate) {
+        errs.push('Joining date cannot be more than 2 weeks from today for contract workers')
+      }
     }
     if (selectedTrack === 'subcontractor_company_worker') {
       if (!form.supplier_id) errs.push('Supplier company is required')
@@ -168,13 +184,13 @@ export default function OnboardingPage() {
 
     setSaving(true); setFormError(null)
     try {
-      const worker_number = await getNextWorkerNumber()
+      const workerNumber = await getNextWorkerNumber()
+      console.log('Using worker number:', workerNumber)
       const full_name = `${form.first_name.trim()} ${form.last_name.trim()}`.trim()
       const base = {
-        worker_number,
+        worker_number: workerNumber,
         first_name: form.first_name.trim(),
         last_name: form.last_name.trim(),
-        full_name,
         nationality: form.nationality,
         passport_number: form.passport_number.trim(),
         passport_expiry: form.passport_expiry || null,
@@ -201,8 +217,8 @@ export default function OnboardingPage() {
           ...base,
           category: 'Contract Worker',
           hourly_rate: parseFloat(form.hourly_rate) || null,
-          food_allowance: parseFloat(form.food_allowance) || 0,
-          other_allowance: parseFloat(form.other_allowance) || 0,
+          food_allowance: 0,
+          other_allowance: 0,
           payment_method: 'WPS'
         }
       } else {
@@ -216,7 +232,34 @@ export default function OnboardingPage() {
         }
       }
 
-      const created = await addWorker(payload)
+      console.log('=== CONTRACT WORKER INSERT PAYLOAD ===')
+      console.log('worker_number:', workerNumber)
+      console.log('first_name:', form.first_name)
+      console.log('last_name:', form.last_name)
+      console.log('nationality:', form.nationality)
+      console.log('trade_role:', form.trade_role || form.position)
+      console.log('category:', 'Contract Worker')
+      console.log('status:', 'onboarding')
+      console.log('full payload:', JSON.stringify(payload, null, 2))
+
+      let created
+      try {
+        const { data, error } = await supabase.from('workers').insert(payload).select().single()
+        if (error) {
+          console.error('=== INSERT ERROR ===')
+          console.error('message:', error.message)
+          console.error('details:', error.details)
+          console.error('hint:', error.hint)
+          console.error('code:', error.code)
+          throw new Error(`${error.message} — ${error.details || ''} — hint: ${error.hint || ''}`)
+        }
+        created = data
+      } catch(err) {
+        console.error('CATCH:', err)
+        setFormError(err.message)
+        setSaving(false)
+        return
+      }
       if (!created) throw new Error('Failed to create worker — check unique constraints')
 
       await initialiseWorkerDocuments(created, supabase)
@@ -231,7 +274,7 @@ export default function OnboardingPage() {
         }])
       }
 
-      setToast(`${worker_number} ${full_name} added to onboarding`)
+      setToast(`${workerNumber} ${full_name} added to onboarding`)
       setTimeout(() => setToast(null), 4000)
       setShowDrawer(false)
       await refresh()
@@ -300,7 +343,8 @@ export default function OnboardingPage() {
       closeChecklist()
       await refresh()
     } catch (e) {
-      alert('Convert failed: ' + e.message)
+      setToast('Convert failed: ' + e.message)
+      setTimeout(() => setToast(null), 4000)
     }
   }
 
@@ -401,6 +445,7 @@ export default function OnboardingPage() {
           blockingStatus={blockingStatus(checklistWorker, workerDocs)}
           onClose={closeChecklist}
           onConvert={handleConvert}
+          onDocsUpdate={setWorkerDocs}
         />
       )}
     </AppShell>
@@ -443,7 +488,8 @@ function OnboardingRow({ worker, onOpen }) {
 
 function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassportBlur, suppliers }) {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const expiryWarn = form.passport_expiry && !passportExpiryValid(form.passport_expiry) && track !== 'subcontractor_company_worker'
+  const minMonths = track === 'direct_staff' ? 7 : 1
+  const expiryWarn = form.passport_expiry && !passportExpiryValid(form.passport_expiry, minMonths)
   return (
     <div style={{display:'flex',flexDirection:'column',gap:14}}>
       {track === 'direct_staff' && (
@@ -453,12 +499,12 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
       )}
       {track === 'contract_worker' && (
         <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:6,padding:'10px 12px',fontSize:12,color:'#1e3a8a'}}>
-          Contract workers are paid via WPS/C3. A C3 card setup task will be created automatically. No offer letter is issued.
+          Contract workers are paid via WPS/C3. A C3 card setup task will be created automatically. No offer letter is issued. You must collect and upload passport copy, passport photo, UAE visa, Emirates ID and Workmen&rsquo;s Compensation before the worker can be activated. Health insurance is the worker&rsquo;s own responsibility — upload their certificate for compliance.
         </div>
       )}
       {track === 'subcontractor_company_worker' && (
         <div style={{background:'#f1f5f9',border:'1px solid #cbd5e1',borderRadius:6,padding:'10px 12px',fontSize:12,color:'#334155'}}>
-          This worker is employed by {suppliers.find(s => s.id === form.supplier_id)?.name || '[supplier name]'}, not by Innovation Technologies. They will be tracked for timesheet purposes only and will NOT appear in IT payroll. Their hours will be used to generate monthly supplier invoicing summaries.
+          This worker is employed by {suppliers.find(s => s.id === form.supplier_id)?.name || '[supplier name]'}, not by Innovation Technologies. They will be tracked for timesheet purposes only and will NOT appear in IT payroll. Their hours will be used to generate monthly supplier invoicing summaries. Passport copy, UAE visa, Emirates ID and WC certificate must be uploaded before site activation. Health insurance is provided by their employer — obtain and upload their certificate.
         </div>
       )}
 
@@ -487,7 +533,7 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
         </div>
         <div className="form-field"><label className="form-label">Passport expiry *</label>
           <input className="form-input" type="date" value={form.passport_expiry} onChange={e => set('passport_expiry', e.target.value)} style={expiryWarn?{borderColor:'var(--danger)'}:{}} />
-          {expiryWarn && <div style={{fontSize:11,color:'var(--danger)',marginTop:4}}>⚠ Passport must be valid for at least 7 more months</div>}
+          {expiryWarn && <div style={{fontSize:11,color:'var(--danger)',marginTop:4}}>⚠ Passport must be valid for at least {minMonths} more month{minMonths > 1 ? 's' : ''}</div>}
         </div>
         <div className="form-field"><label className="form-label">Position / Trade *</label>
           <select className="form-select" value={form.trade_role} onChange={e => set('trade_role', e.target.value)}>
@@ -531,14 +577,16 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
           <div className="form-field"><label className="form-label">Hourly rate (AED) *</label>
             <input className="form-input" type="number" value={form.hourly_rate} onChange={e => set('hourly_rate', e.target.value)} />
           </div>
-          <div className="form-field"><label className="form-label">Food allowance (AED)</label>
-            <input className="form-input" type="number" value={form.food_allowance} onChange={e => set('food_allowance', e.target.value)} />
-          </div>
-          <div className="form-field"><label className="form-label">Other allowance (AED)</label>
-            <input className="form-input" type="number" value={form.other_allowance} onChange={e => set('other_allowance', e.target.value)} />
-          </div>
           <div className="form-field"><label className="form-label">Expected joining date</label>
-            <input className="form-input" type="date" value={form.joining_date} onChange={e => set('joining_date', e.target.value)} />
+            <input
+              className="form-input"
+              type="date"
+              value={form.joining_date}
+              onChange={e => set('joining_date', e.target.value)}
+              min={new Date().toISOString().split('T')[0]}
+              max={(() => { const d = new Date(); d.setDate(d.getDate() + 14); return d.toISOString().split('T')[0] })()}
+            />
+            <div style={{fontSize:11,color:'var(--hint)',marginTop:4}}>Maximum 2 weeks from today</div>
           </div>
         </>}
 
@@ -561,9 +609,29 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
   )
 }
 
-function ChecklistDrawer({ worker, docs, blockingStatus, onClose, onConvert }) {
+function ChecklistDrawer({ worker, docs, blockingStatus, onClose, onConvert, onDocsUpdate }) {
   const tpl = getDocumentTemplate(worker)
   const track = TRACKS[worker.entry_track]
+  const [openUploadFor, setOpenUploadFor] = useState(null)
+
+  const refreshDocs = async () => {
+    const { data } = await supabase.from('documents').select('*').eq('worker_id', worker.id)
+    onDocsUpdate(data || [])
+  }
+
+  const toggleUpload = (docType) => {
+    setOpenUploadFor(prev => prev === docType ? null : docType)
+  }
+
+  const confirmHighlight = async (t, checked) => {
+    const { error } = await supabase
+      .from('documents')
+      .update({ highlighted_name_confirmed: checked })
+      .eq('worker_id', worker.id)
+      .eq('doc_type', t.doc_type)
+    if (!error) await refreshDocs()
+  }
+
   return (
     <DrawerForm
       title={`Checklist — ${worker.full_name}`}
@@ -585,26 +653,53 @@ function ChecklistDrawer({ worker, docs, blockingStatus, onClose, onConvert }) {
         {tpl.map(t => {
           const d = docs.find(x => x.doc_type === t.doc_type)
           const ok = d && (d.status === 'valid' || d.status === 'expiring_soon') && (!t.requires_highlight || d.highlighted_name_confirmed === true)
+          const isMissing = !d || d.status === 'missing' || !d.file_url
+          const isOpen = openUploadFor === t.doc_type
           return (
-            <div key={t.doc_type} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',border:'1px solid var(--border)',borderRadius:6,background:ok?'#f0fdf4':'#fff'}}>
-              <div style={{width:22,height:22,borderRadius:'50%',background:ok?'#16a34a':(t.is_blocking?'#fecaca':'#e2e8f0'),display:'flex',alignItems:'center',justifyContent:'center'}}>
-                {ok ? <span style={{color:'#fff',fontSize:12,fontWeight:700}}>✓</span> : t.is_blocking ? <span style={{color:'#dc2626',fontSize:10,fontWeight:700}}>!</span> : null}
+            <div key={t.doc_type}>
+              <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',border:'1px solid var(--border)',borderRadius:6,background:ok?'#f0fdf4':'#fff',flexWrap:'wrap'}}>
+                <div style={{width:22,height:22,borderRadius:'50%',background:ok?'#16a34a':(t.is_blocking?'#fecaca':'#e2e8f0'),display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  {ok ? <span style={{color:'#fff',fontSize:12,fontWeight:700}}>✓</span> : t.is_blocking ? <span style={{color:'#dc2626',fontSize:10,fontWeight:700}}>!</span> : null}
+                </div>
+                <div style={{flex:1,minWidth:160}}>
+                  <div style={{fontSize:13,fontWeight:500}}>{t.label}</div>
+                  {d?.expiry_date && <div style={{fontSize:11,color:'var(--hint)'}}>Expires {formatDate(d.expiry_date)}</div>}
+                  {t.requires_highlight && d && d.file_url && d.highlighted_name_confirmed !== true && (
+                    <label style={{fontSize:11,color:'#dc2626',display:'flex',alignItems:'center',gap:4,marginTop:4,cursor:'pointer'}}>
+                      <input type="checkbox" checked={false} onChange={e => confirmHighlight(t, e.target.checked)} />
+                      Worker name is highlighted on this document
+                    </label>
+                  )}
+                  {t.requires_highlight && d && d.highlighted_name_confirmed === true && (
+                    <div style={{fontSize:11,color:'#16a34a',marginTop:4}}>✓ Name highlight confirmed</div>
+                  )}
+                  {t.note && <div style={{fontSize:11,color:'var(--hint)',fontStyle:'italic'}}>{t.note}</div>}
+                </div>
+                {t.is_blocking && <span style={{fontSize:9,fontWeight:700,color:'#dc2626',background:'#fee2e2',padding:'2px 6px',borderRadius:10}}>BLOCKING</span>}
+                {!t.is_blocking && <span style={{fontSize:9,fontWeight:700,color:'#64748b',background:'#f1f5f9',padding:'2px 6px',borderRadius:10}}>OPTIONAL</span>}
+                <span style={{fontSize:11,color:ok?'var(--success)':'var(--hint)',fontWeight:500,minWidth:50,textAlign:'right'}}>{ok ? 'On file' : (d?.status || 'missing')}</span>
+                <button
+                  type="button"
+                  onClick={() => toggleUpload(t.doc_type)}
+                  style={{cursor:'pointer',fontSize:11,fontWeight:600,color:isMissing?'#0d9488':'#64748b',background:isMissing?'#f0fdfa':'#f8fafc',border:`1px solid ${isMissing?'#99f6e4':'#e2e8f0'}`,padding:'4px 10px',borderRadius:6,whiteSpace:'nowrap'}}>
+                  {isOpen ? '✕ Close' : isMissing ? '↑ Upload' : '↻ Replace'}
+                </button>
               </div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:13,fontWeight:500}}>{t.label}</div>
-                {d?.expiry_date && <div style={{fontSize:11,color:'var(--hint)'}}>Expires {formatDate(d.expiry_date)}</div>}
-                {t.requires_highlight && d && d.highlighted_name_confirmed !== true && (
-                  <div style={{fontSize:11,color:'#dc2626'}}>Name highlight not confirmed</div>
-                )}
-              </div>
-              {t.is_blocking && <span style={{fontSize:9,fontWeight:700,color:'#dc2626',background:'#fee2e2',padding:'2px 6px',borderRadius:10}}>BLOCKING</span>}
-              {!t.is_blocking && <span style={{fontSize:9,fontWeight:700,color:'#64748b',background:'#f1f5f9',padding:'2px 6px',borderRadius:10}}>OPTIONAL</span>}
-              <span style={{fontSize:11,color:ok?'var(--success)':'var(--hint)',fontWeight:500,minWidth:60,textAlign:'right'}}>{ok ? 'On file' : (d?.status || 'missing')}</span>
+              {isOpen && (
+                <DocumentUploadForm
+                  docType={t.doc_type}
+                  docLabel={t.label}
+                  isBlocking={t.is_blocking}
+                  workerId={worker.id}
+                  onCancel={() => setOpenUploadFor(null)}
+                  onSaved={async () => { await refreshDocs(); setOpenUploadFor(null) }}
+                />
+              )}
             </div>
           )
         })}
         <div style={{fontSize:11,color:'var(--hint)',marginTop:6}}>
-          Upload documents from the worker&rsquo;s profile (Documents tab). Come back here to convert once all blocking items are on file.
+          Upload directly from this checklist. Full document details (expiry, notes) can still be edited on the worker profile Documents tab.
         </div>
       </div>
     </DrawerForm>

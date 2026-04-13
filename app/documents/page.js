@@ -5,8 +5,9 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { addDocument, updateDocument, getVisibleWorkers, makeId, getWorkerDisplay, getWorker } from '../../lib/mockStore'
-import { getExpiringDocuments, getMissingBlockingDocuments } from '../../lib/documentService'
+import { makeId } from '../../lib/mockStore'
+import { getAllDocumentsWithWorkers, upsertDocument } from '../../lib/documentService'
+import { getVisibleWorkers } from '../../lib/workerService'
 import { formatDate, getStatusTone, getDocumentStatus, validateRequired, validateExpiryAfterIssue, validateDateNotPast } from '../../lib/utils'
 
 const DOCUMENT_TYPES = ['passport','emirates_id','visa','photo','cv','offer_letter','employment_contract','labour_contract','labour_card','labour_permit','medical_fitness','medical_insurance','workers_compensation','unemployment_insurance','bank_account_details','site_induction','safety_orientation','site_access_card','subcontractor_agreement','subcontractor_trade_licence','subcontractor_insurance','resignation_letter','termination_notice','eos_calculation','exit_clearance','final_payslip','experience_letter']
@@ -16,7 +17,7 @@ const CATEGORIES = ['personal','employment','compliance','site','subcontractor',
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState([])
   const [workers, setWorkers] = useState([])
-  const [queue, setQueue] = useState('expired')
+  const [queue, setQueue] = useState('missing')
   const [search, setSearch] = useState('')
   const [showDrawer, setShowDrawer] = useState(false)
   const [formErrors, setFormErrors] = useState([])
@@ -29,15 +30,31 @@ export default function DocumentsPage() {
   const [loadError, setLoadError] = useState(null)
 
   const reloadDocs = async () => {
-    const ws = getVisibleWorkers()
+    const [ws, docs] = await Promise.all([getVisibleWorkers(), getAllDocumentsWithWorkers()])
     setWorkers(ws)
-    const [expiring, missingArrays] = await Promise.all([
-      getExpiringDocuments(9999),
-      Promise.all(ws.map(w => getMissingBlockingDocuments(w.id).catch(() => [])))
-    ])
-    const missingBlocking = missingArrays.flat()
-    setDocuments([...(expiring || []), ...missingBlocking])
+    // Compute per-doc status if missing, and alias schema fields for this page's legacy field names
+    const today = new Date(); today.setHours(0,0,0,0)
+    const normalised = docs.map(d => {
+      let status = d.status
+      if (d.file_url && d.expiry_date) {
+        const days = Math.ceil((new Date(d.expiry_date) - today) / (1000*60*60*24))
+        if (days < 0) status = 'expired'
+        else if (days <= 30) status = 'expiring_soon'
+        else status = 'valid'
+      } else if (!d.file_url) {
+        status = 'missing'
+      }
+      return {
+        ...d,
+        status,
+        document_type: d.doc_type,
+        document_category: d.doc_subtype || '—',
+      }
+    })
+    setDocuments(normalised)
   }
+
+  const getWorkerFor = (id) => documents.find(d => d.worker_id === id)?.workers || workers.find(w => w.id === id) || null
 
   useEffect(() => {
     let cancelled = false
@@ -59,8 +76,13 @@ export default function DocumentsPage() {
     missing: documents.filter(d => d.status === 'missing'),
     expired: documents.filter(d => d.status === 'expired'),
     expiring_soon: documents.filter(d => d.status === 'expiring_soon'),
-    contracts_due: documents.filter(d => d.document_type === 'employment_contract' && d.status === 'expiring_soon'),
+    contracts_due: documents.filter(d => (d.doc_type === 'employment_contract' || d.document_type === 'employment_contract') && d.status === 'missing'),
     valid: documents.filter(d => d.status === 'valid')
+  }
+
+  const workerDisplay = (wid) => {
+    const w = getWorkerFor(wid)
+    return { name_primary: w?.full_name || 'Unknown', id_secondary: w?.worker_number || '—' }
   }
 
   const current = queues[queue] || []
@@ -75,12 +97,22 @@ export default function DocumentsPage() {
 
   const handleSaveDoc = async () => {
     if (!docDrawerForm.expiry_date) return
-    const status = getDocumentStatus(docDrawerForm.expiry_date, selectedDoc.document_type)
-    const worker = getWorker(selectedDoc.worker_id)
+    const docType = selectedDoc.doc_type || selectedDoc.document_type
+    const status = getDocumentStatus(docDrawerForm.expiry_date, docType)
+    const worker = getWorkerFor(selectedDoc.worker_id)
     const ext = docDrawerForm.file ? docDrawerForm.file.name.split('.').pop() : 'pdf'
-    const fileName = docDrawerForm.file && worker ? `${worker.worker_number}_${worker.full_name.replace(/\s+/g,'_')}_${selectedDoc.document_type}.${ext}` : (selectedDoc.file_name || null)
-    updateDocument(selectedDoc.id, { issue_date: docDrawerForm.issue_date, expiry_date: docDrawerForm.expiry_date, notes: docDrawerForm.notes, status, file_name: docDrawerForm.file ? fileName : (selectedDoc.file_name || null) })
-    try { await reloadDocs() } catch (err) { setLoadError(err?.message || 'Failed to refresh documents') }
+    const fileName = docDrawerForm.file && worker ? `${worker.worker_number}_${(worker.full_name||'').replace(/\s+/g,'_')}_${docType}.${ext}` : (selectedDoc.file_url || null)
+    try {
+      await upsertDocument(selectedDoc.worker_id, docType, {
+        label: selectedDoc.label || docType,
+        is_blocking: selectedDoc.is_blocking,
+        issue_date: docDrawerForm.issue_date || null,
+        expiry_date: docDrawerForm.expiry_date || null,
+        status,
+        file_url: docDrawerForm.file ? fileName : selectedDoc.file_url || null
+      })
+      await reloadDocs()
+    } catch (err) { setLoadError(err?.message || 'Failed to save document') }
     setSelectedDoc(null)
   }
 
@@ -97,9 +129,17 @@ export default function DocumentsPage() {
     setFormWarnings([dateWarn, pastWarn].filter(Boolean))
     setFormErrors([])
     const status = getDocumentStatus(form.expiry_date, form.document_type)
-    const doc = { ...form, id: makeId('doc'), status, file_url: null, locked: false, unlock_reason: null }
-    addDocument(doc)
-    try { await reloadDocs() } catch (err) { setLoadError(err?.message || 'Failed to refresh documents') }
+    try {
+      await upsertDocument(form.worker_id, form.document_type, {
+        label: form.document_type,
+        is_blocking: false,
+        issue_date: form.issue_date || null,
+        expiry_date: form.expiry_date || null,
+        status,
+        file_url: form.file_name || null
+      })
+      await reloadDocs()
+    } catch (err) { setLoadError(err?.message || 'Failed to add document'); return }
     setShowDrawer(false)
     setFormWarnings([])
   }
@@ -135,7 +175,7 @@ export default function DocumentsPage() {
               <tbody>
                 {filtered.map(d => (
                   <tr key={d.id} style={{cursor:'pointer'}} onClick={() => openDocDrawer(d)}>
-                    <td>{(() => { const wi = getWorkerDisplay(d.worker_id); const inactive = getWorker(d.worker_id)?.active === false; return <Link href={`/workers/${d.worker_id}`} style={{color:'var(--teal)'}}><div style={{fontWeight:500,display:'flex',alignItems:'center',gap:6}}>{wi.name_primary}{inactive && <span style={{fontSize:10,fontWeight:600,color:'#64748b',background:'#e2e8f0',borderRadius:10,padding:'1px 6px'}}>Inactive</span>}</div><div style={{fontSize:11,color:'var(--hint)'}}>{wi.id_secondary}</div></Link> })()}</td>
+                    <td>{(() => { const wi = workerDisplay(d.worker_id); const inactive = getWorkerFor(d.worker_id)?.status === 'inactive'; return <Link href={`/workers/${d.worker_id}`} style={{color:'var(--teal)'}}><div style={{fontWeight:500,display:'flex',alignItems:'center',gap:6}}>{wi.name_primary}{inactive && <span style={{fontSize:10,fontWeight:600,color:'#64748b',background:'#e2e8f0',borderRadius:10,padding:'1px 6px'}}>Inactive</span>}</div><div style={{fontSize:11,color:'var(--hint)'}}>{wi.id_secondary}</div></Link> })()}</td>
                     <td style={{fontWeight:500}}>{d.document_type}</td>
                     <td><StatusBadge label={d.document_category} tone="neutral" /></td>
                     <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(d.issue_date)}</td>
@@ -190,8 +230,8 @@ export default function DocumentsPage() {
     </AppShell>
 
     {selectedDoc && (() => {
-      const worker = getWorker(selectedDoc.worker_id)
-      const wi = getWorkerDisplay(selectedDoc.worker_id)
+      const worker = getWorkerFor(selectedDoc.worker_id)
+      const wi = workerDisplay(selectedDoc.worker_id)
       const exp = selectedDoc.expiry_date ? new Date(selectedDoc.expiry_date) : null
       const today = new Date()
       const days = exp ? Math.ceil((exp - today) / (1000*60*60*24)) : null

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
 import { getDashboardMetrics, getInboxItems, getPendingApprovalsForRole, getWorkerDisplay, getAbsentToday, getAbsencePercentage, checkNonReturnStatus, getAllPayrollBatches } from '../../lib/mockStore'
 import { getAllWorkers } from '../../lib/workerService'
+import { supabase } from '../../lib/supabaseClient'
 import { formatDate } from '../../lib/utils'
 import { getRole } from '../../lib/mockAuth'
 
@@ -41,9 +42,31 @@ export default function DashboardPage() {
           subcontractors: active.filter(w => w.category === 'Subcontract Worker' || w.category === 'Subcontractor').length,
           byCategory,
         }
+        // Real document & certification counts from Supabase
+        const todayStr = new Date().toISOString().split('T')[0]
+        const in30Str = new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0]
+
+        const [missingDocsRes, expiredDocsRes, expiringDocsRes, expiredCertsRes, expiringCertsRes] = await Promise.all([
+          supabase.from('documents').select('*, workers(worker_number, full_name)').eq('status','missing').eq('is_blocking', true),
+          supabase.from('documents').select('*, workers(worker_number, full_name)').lt('expiry_date', todayStr).neq('status','missing'),
+          supabase.from('documents').select('*, workers(worker_number, full_name)').gte('expiry_date', todayStr).lte('expiry_date', in30Str),
+          supabase.from('certifications').select('*, workers(worker_number, full_name)').lt('expiry_date', todayStr),
+          supabase.from('certifications').select('*, workers(worker_number, full_name)').gte('expiry_date', todayStr).lte('expiry_date', in30Str),
+        ])
+        const normaliseDoc = (d) => ({ ...d, document_type: d.doc_type })
+        const normaliseCert = (c) => ({ ...c, certification_type: c.cert_type })
+        const realInbox = {
+          ...baseInbox,
+          missingDocs: (missingDocsRes.data || []).map(normaliseDoc),
+          expiredDocs: (expiredDocsRes.data || []).map(normaliseDoc),
+          expiringDocs: (expiringDocsRes.data || []).map(normaliseDoc),
+          expiredCerts: (expiredCertsRes.data || []).map(normaliseCert),
+          expiringCerts: (expiringCertsRes.data || []).map(normaliseCert),
+        }
+
         if (!cancelled) {
           setMetrics(mergedMetrics)
-          setInbox(baseInbox)
+          setInbox(realInbox)
         }
       } catch (err) {
         if (!cancelled) setLoadError(err?.message || 'Failed to load dashboard')
@@ -228,7 +251,7 @@ export default function DashboardPage() {
             : <div className="table-wrap"><table>
                 <thead><tr><th>Worker</th><th>Document</th><th>Expired</th></tr></thead>
                 <tbody>
-                  {inbox.expiredDocs?.slice(0,6).map(d=>{ const wi = getWorkerDisplay(d.worker_id); return (
+                  {inbox.expiredDocs?.slice(0,6).map(d=>{ const wi = d.workers ? { name_primary: d.workers.full_name, id_secondary: d.workers.worker_number } : getWorkerDisplay(d.worker_id); return (
                     <tr key={d.id} style={{cursor:'pointer',background:'#fff8f8'}} onClick={()=>router.push('/documents')}>
                       <td><div style={{fontWeight:500}}>{wi.name_primary}</div><div style={{fontSize:11,color:'var(--hint)'}}>{wi.id_secondary}</div></td>
                       <td style={{fontSize:12}}>{d.document_type}</td>
@@ -246,7 +269,7 @@ export default function DashboardPage() {
             : <div className="table-wrap"><table>
                 <thead><tr><th>Worker</th><th>Certification</th><th>Expired</th></tr></thead>
                 <tbody>
-                  {inbox.expiredCerts?.slice(0,6).map(c=>{ const wi = getWorkerDisplay(c.worker_id); return (
+                  {inbox.expiredCerts?.slice(0,6).map(c=>{ const wi = c.workers ? { name_primary: c.workers.full_name, id_secondary: c.workers.worker_number } : getWorkerDisplay(c.worker_id); return (
                     <tr key={c.id} style={{cursor:'pointer',background:'#fff8f8'}} onClick={()=>router.push('/certifications')}>
                       <td><div style={{fontWeight:500}}>{wi.name_primary}</div><div style={{fontSize:11,color:'var(--hint)'}}>{wi.id_secondary}</div></td>
                       <td style={{fontSize:12}}>{c.certification_type}</td>

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import AppShell from '../../../components/AppShell'
@@ -10,6 +10,8 @@ import { getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLe
 import { getWorkerById } from '../../../lib/workerService'
 import { getDocumentsByWorker, upsertDocument } from '../../../lib/documentService'
 import { getDocumentTemplate, generateDocumentFilename } from '../../../lib/documentRegister'
+import DocumentUploadForm from '../../../components/DocumentUploadForm'
+import { supabase } from '../../../lib/supabaseClient'
 import { getAttendanceByWorker } from '../../../lib/attendanceService'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
 import { offerLetterHTML, warningLetterHTML, experienceLetterHTML, terminationWithNoticeHTML, terminationWithoutNoticeHTML, resignationAcceptanceHTML, policyManualHTML, TERMINATION_GROUNDS_LIST } from '../../../lib/letterTemplates'
@@ -28,6 +30,8 @@ export default function WorkerDetailPage() {
   const [letterLang, setLetterLang] = useState('english')
   const [selectedDoc, setSelectedDoc] = useState(null)
   const [docForm, setDocForm] = useState({ issue_date:'', expiry_date:'', file_name:null, file_original:null, notes:'' })
+  const [openUploadFor, setOpenUploadFor] = useState(null)
+  const [saveBanner, setSaveBanner] = useState(null)
   const [showTerminationForm, setShowTerminationForm] = useState(false)
   const [terminationType, setTerminationType] = useState('notice')
   const [terminationDetails, setTerminationDetails] = useState({ notice_days:30, last_working_date:'', reason:'', reason_body:'', ground_key:'misconduct', additional_details:'', effective_date:new Date().toISOString().split('T')[0], resignation_date:'', notice_period:'60 days', additional_note:'' })
@@ -146,6 +150,8 @@ export default function WorkerDetailPage() {
           </div>
         )}
 
+        {saveBanner && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:6,padding:'10px 14px',color:'#991b1b',fontSize:13,marginBottom:12}}>⚠ {saveBanner}</div>}
+
         <div className="tabs">
           {['profile','documents','certifications','warnings','letters'].map(t => <button key={t} className={`tab${tab===t?' active':''}`} onClick={() => setTab(t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
         </div>
@@ -255,8 +261,9 @@ export default function WorkerDetailPage() {
                       const isWC = d.doc_type === 'workmen_compensation'
                       const wcOk = d.highlighted_name_confirmed === true
                       const packBlocked = isWC && d.expiry_date && new Date(d.expiry_date) < today
+                      const isOpen = openUploadFor === 'pack:' + d.doc_type
                       return (
-                        <div key={d.id} style={{background:s.bg,border:`1px solid ${s.border}`,borderRadius:8,padding:'10px 12px'}}>
+                        <div key={d.id} style={{gridColumn: isOpen ? '1/-1' : 'auto',background:s.bg,border:`1px solid ${s.border}`,borderRadius:8,padding:'10px 12px'}}>
                           <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>{d.label}</div>
                           <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
                             <StatusBadge label={s.label} tone={s.tone} />
@@ -269,7 +276,36 @@ export default function WorkerDetailPage() {
                             </div>
                           )}
                           {packBlocked && <div style={{fontSize:10,fontWeight:600,marginTop:4,color:'#991b1b',background:'#fee2e2',padding:'3px 6px',borderRadius:4}}>PACK BLOCKED</div>}
-                          <button className="btn btn-teal btn-sm" style={{fontSize:10,padding:'3px 8px',marginTop:6}} onClick={() => { setSelectedDoc(d); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:d.expiry_date||'', file_name:null, file_original:null, notes:'' }) }}>{has ? 'Update' : 'Upload'}</button>
+                          <div style={{display:'flex',gap:6,marginTop:6,alignItems:'center',flexWrap:'wrap'}}>
+                            <button
+                              type="button"
+                              onClick={() => setOpenUploadFor(prev => prev === 'pack:' + d.doc_type ? null : 'pack:' + d.doc_type)}
+                              style={{cursor:'pointer',fontSize:10,fontWeight:600,color:has?'#64748b':'#0d9488',background:has?'#f8fafc':'#f0fdfa',border:`1px solid ${has?'#e2e8f0':'#99f6e4'}`,padding:'3px 8px',borderRadius:6,whiteSpace:'nowrap'}}>
+                              {isOpen ? '✕ Close' : has ? '↻ Replace' : '↑ Upload'}
+                            </button>
+                            <button className="btn btn-ghost btn-sm" style={{fontSize:10,padding:'3px 8px'}} onClick={() => { setSelectedDoc(d); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:d.expiry_date||'', file_name:null, file_original:null, notes:'' }) }}>Details</button>
+                          </div>
+                          {isWC && has && !wcOk && (
+                            <label style={{fontSize:10,color:'#dc2626',display:'flex',alignItems:'center',gap:4,marginTop:4,cursor:'pointer'}}>
+                              <input type="checkbox" checked={false} onChange={async e => {
+                                try {
+                                  await upsertDocument(id, d.doc_type, { label:d.label, is_blocking:d.is_blocking, highlighted_name_confirmed:e.target.checked })
+                                  setDocs(await getDocumentsByWorker(id))
+                                } catch (err) { setSaveBanner('Update failed: ' + err.message); setTimeout(() => setSaveBanner(null), 4000) }
+                              }} />
+                              Worker name is highlighted
+                            </label>
+                          )}
+                          {isOpen && (
+                            <DocumentUploadForm
+                              docType={d.doc_type}
+                              docLabel={d.label}
+                              isBlocking={d.is_blocking}
+                              workerId={id}
+                              onCancel={() => setOpenUploadFor(null)}
+                              onSaved={async () => { setDocs(await getDocumentsByWorker(id)); setOpenUploadFor(null) }}
+                            />
+                          )}
                         </div>
                       )
                     })}
@@ -297,8 +333,10 @@ export default function WorkerDetailPage() {
                     }
                     const compliance = ['health_insurance','health_card'].includes(d.doc_type)
                     const fileName = d.file_url ? d.file_url.split('/').pop() : generateDocumentFilename(worker, d.doc_type, 'pdf')
+                    const isOpen = openUploadFor === 'row:' + d.doc_type
                     return (
-                      <tr key={d.id}>
+                      <React.Fragment key={d.id}>
+                      <tr style={has && !isOpen ? {background:'#f0fdf4'} : {}}>
                         <td>
                           <div style={{fontWeight:500}}>{d.label}</div>
                           {compliance && <div style={{fontSize:10,color:'var(--hint)',fontStyle:'italic',marginTop:2}}>Compliance tracking only — not included in document pack</div>}
@@ -309,9 +347,46 @@ export default function WorkerDetailPage() {
                           {has ? <a href={d.file_url} target="_blank" rel="noreferrer" style={{color:'#0d9488'}}>📎 {fileName}</a> : <span style={{fontStyle:'italic'}}>Not uploaded</span>}
                         </td>
                         <td>
-                          <button className="btn btn-teal btn-sm" style={{fontSize:11}} onClick={() => { setSelectedDoc(d); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:d.expiry_date||'', file_name:null, file_original:null, notes:'' }) }}>{has ? 'Update' : 'Upload'}</button>
+                          <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                            <button
+                              type="button"
+                              onClick={() => setOpenUploadFor(prev => prev === 'row:' + d.doc_type ? null : 'row:' + d.doc_type)}
+                              style={{cursor:'pointer',fontSize:11,fontWeight:600,color:has?'#64748b':'#0d9488',background:has?'#f8fafc':'#f0fdfa',border:`1px solid ${has?'#e2e8f0':'#99f6e4'}`,padding:'4px 10px',borderRadius:6,whiteSpace:'nowrap'}}>
+                              {isOpen ? '✕ Close' : has ? '↻ Replace' : '↑ Upload'}
+                            </button>
+                            <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={() => { setSelectedDoc(d); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:d.expiry_date||'', file_name:null, file_original:null, notes:'' }) }}>Details</button>
+                          </div>
+                          {d.doc_type === 'workmen_compensation' && has && d.highlighted_name_confirmed !== true && (
+                            <label style={{fontSize:10,color:'#dc2626',display:'flex',alignItems:'center',gap:4,marginTop:4,cursor:'pointer'}}>
+                              <input type="checkbox" checked={false} onChange={async e => {
+                                try {
+                                  await upsertDocument(id, d.doc_type, { label:d.label, is_blocking:d.is_blocking, highlighted_name_confirmed:e.target.checked })
+                                  setDocs(await getDocumentsByWorker(id))
+                                } catch (err) { setSaveBanner('Update failed: ' + err.message); setTimeout(() => setSaveBanner(null), 4000) }
+                              }} />
+                              Worker name is highlighted
+                            </label>
+                          )}
+                          {d.doc_type === 'workmen_compensation' && has && d.highlighted_name_confirmed === true && (
+                            <div style={{fontSize:10,color:'#16a34a',marginTop:4}}>✓ Name highlight confirmed</div>
+                          )}
                         </td>
                       </tr>
+                      {isOpen && (
+                        <tr>
+                          <td colSpan={5} style={{background:'#fff',padding:0}}>
+                            <DocumentUploadForm
+                              docType={d.doc_type}
+                              docLabel={d.label}
+                              isBlocking={d.is_blocking}
+                              workerId={id}
+                              onCancel={() => setOpenUploadFor(null)}
+                              onSaved={async () => { setDocs(await getDocumentsByWorker(id)); setOpenUploadFor(null) }}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     )
                   })}
                 </tbody>
@@ -379,7 +454,7 @@ export default function WorkerDetailPage() {
                           await upsertDocument(id, selectedDoc.doc_type, { label:selectedDoc.label, is_blocking:selectedDoc.is_blocking, issue_date:docForm.issue_date || null, expiry_date:docForm.expiry_date || null, file_url:docForm.file_name || selectedDoc.file_url || null, status:newStatus })
                           setDocs(await getDocumentsByWorker(id))
                           setSelectedDoc(null)
-                        } catch (err) { alert('Save failed: ' + err.message) }
+                        } catch (err) { setSaveBanner('Save failed: ' + err.message); setTimeout(() => setSaveBanner(null), 4000) }
                       }}>Save &amp; Update</button>
                     </div>
                   </div>
@@ -512,7 +587,7 @@ export default function WorkerDetailPage() {
                         addLetter({id:makeId('let'),ref_number:ref,letter_type:letterType,worker_id:worker.id,worker_name:worker.full_name,worker_number:worker.worker_number,language:letterLang,issued_date:today,issued_by:'HR Admin',linked_record_id:null,status:'issued',notes:terminationType==='no_notice'?TERMINATION_GROUNDS_LIST[terminationDetails.ground_key]?.label:''})
                         setLetters(getLettersByWorker(worker.id))
                         setViewerHtml(html); setViewerRef(ref); setShowTerminationForm(false)
-                      } catch(e) { alert('Error: ' + e.message) }
+                      } catch(e) { setSaveBanner('Error: ' + e.message); setTimeout(() => setSaveBanner(null), 4000) }
                     }}>Generate & Preview Letter</button>
                   </div>
                   {terminationType==='no_notice' && <div style={{marginTop:10,padding:'8px 12px',background:'#fff',border:'1px solid #fca5a5',borderRadius:4,fontSize:11,color:'#991b1b'}}><strong>Legal note:</strong> {TERMINATION_GROUNDS_LIST[terminationDetails.ground_key]?.article} — {TERMINATION_GROUNDS_LIST[terminationDetails.ground_key]?.label}. {TERMINATION_GROUNDS_LIST[terminationDetails.ground_key]?.consequence}.</div>}
