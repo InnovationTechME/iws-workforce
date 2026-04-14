@@ -180,11 +180,9 @@ export default function OnboardingPage() {
     }
 
     const today = new Date().toISOString().split('T')[0]
-    if (selectedTrack === 'direct_staff' || selectedTrack === 'contract_worker') {
-      if (!form.emirates_id?.trim()) errs.push('Emirates ID number is required')
-      if (!form.emirates_id_expiry) errs.push('Emirates ID expiry is required')
-      else if (form.emirates_id_expiry <= today) errs.push('Emirates ID expiry must be a future date')
-    }
+    if (!form.emirates_id?.trim()) errs.push('Emirates ID / National ID number is required')
+    if (!form.emirates_id_expiry) errs.push('Emirates ID / National ID expiry is required')
+    else if (form.emirates_id_expiry <= today) errs.push('Emirates ID / National ID expiry must be a future date')
     if (!form.visa_number?.trim()) errs.push('UAE Visa number is required')
     if (!form.visa_expiry) errs.push('UAE Visa expiry is required')
     else if (form.visa_expiry <= today) errs.push('UAE Visa expiry must be a future date')
@@ -242,7 +240,7 @@ export default function OnboardingPage() {
           hourly_rate: parseFloat(form.hourly_rate) || null,
           food_allowance: 0,
           other_allowance: 0,
-          payment_method: 'WPS',
+          payment_method: 'Non-WPS',
           health_insurance_provider: form.health_insurance_provider?.trim() || null,
           health_insurance_expiry: form.health_insurance_expiry || null,
         }
@@ -533,17 +531,17 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
     <div style={{display:'flex',flexDirection:'column',gap:14}}>
       {track === 'direct_staff' && (
         <div style={{background:'#ecfeff',border:'1px solid #a5f3fc',borderRadius:6,padding:'10px 12px',fontSize:12,color:'#155e75'}}>
-          Worker must have a signed offer letter before onboarding begins. The offer letter should be created first in the Offers section.
+          Worker must have a signed offer letter before onboarding begins. The offer letter should be created first in the Offers section. Paid via WPS through a C3 card. Innovation Technologies provides health insurance; workmen&rsquo;s compensation is provided for site roles.
         </div>
       )}
       {track === 'contract_worker' && (
         <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:6,padding:'10px 12px',fontSize:12,color:'#1e3a8a'}}>
-          Contract workers are paid via WPS/C3. A C3 card setup task will be created automatically. No offer letter is issued. You must collect and upload passport copy, passport photo, UAE visa, Emirates ID and Workmen&rsquo;s Compensation before the worker can be activated. Health insurance is the worker&rsquo;s own responsibility — upload their certificate for compliance.
+          Contract workers are on Innovation Technologies payroll but paid Non-WPS through a C3 card. A C3 card setup task will be created automatically. No offer letter is issued. You must collect and upload passport copy, passport photo, UAE visa, Emirates ID and Workmen&rsquo;s Compensation before the worker can be activated. Innovation Technologies provides workmen&rsquo;s compensation. Health insurance is the worker&rsquo;s own responsibility — upload their certificate for compliance.
         </div>
       )}
       {track === 'subcontractor_company_worker' && (
         <div style={{background:'#f1f5f9',border:'1px solid #cbd5e1',borderRadius:6,padding:'10px 12px',fontSize:12,color:'#334155'}}>
-          This worker is employed by {suppliers.find(s => s.id === form.supplier_id)?.name || '[supplier name]'}, not by Innovation Technologies. They will be tracked for timesheet purposes only and will NOT appear in IT payroll. Their hours will be used to generate monthly supplier invoicing summaries. Passport copy, UAE visa, Emirates ID and WC certificate must be uploaded before site activation. Health insurance is provided by their employer — obtain and upload their certificate.
+          This worker is employed by {suppliers.find(s => s.id === form.supplier_id)?.name || '[supplier name]'}, not by Innovation Technologies. They are on the supplier&rsquo;s payroll and will NOT appear in IT payroll; their hours feed monthly supplier invoicing. The supplier must provide all four of: passport copy, national ID / Emirates ID, health insurance, and workmen&rsquo;s compensation — all four are blocking for site activation.
         </div>
       )}
 
@@ -660,11 +658,11 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
       <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginTop:4}}>Document Details</div>
       <div className="form-grid">
         <div className="form-field">
-          <label className="form-label">Emirates ID Number {track !== 'subcontractor_company_worker' && '*'}</label>
+          <label className="form-label">Emirates ID / National ID Number *</label>
           <input className="form-input" type="text" value={form.emirates_id} onChange={e => set('emirates_id', e.target.value)} placeholder="784-XXXX-XXXXXXX-X" />
         </div>
         <div className="form-field">
-          <label className="form-label">Emirates ID Expiry {track !== 'subcontractor_company_worker' && '*'}</label>
+          <label className="form-label">Emirates ID / National ID Expiry *</label>
           <input className="form-input" type="date" value={form.emirates_id_expiry} min={new Date(Date.now()+86400000).toISOString().split('T')[0]} onChange={e => set('emirates_id_expiry', e.target.value)} />
         </div>
         <div className="form-field">
@@ -772,7 +770,7 @@ function ChecklistDrawer({ worker, docs, blockingStatus, onClose, onConvert, onD
                   docType={t.doc_type}
                   docLabel={t.label}
                   isBlocking={t.is_blocking}
-                  workerId={worker.id}
+                  worker={worker}
                   onCancel={() => setOpenUploadFor(null)}
                   onSaved={async () => { await refreshDocs(); setOpenUploadFor(null) }}
                 />

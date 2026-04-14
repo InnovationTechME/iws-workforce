@@ -6,7 +6,7 @@ import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
 import { checkBlacklist, makeId, generateRefNumber, addLetter } from '../../lib/mockStore'
-import { getOffers, addOffer, updateOffer } from '../../lib/offerService'
+import { getOffers, addOffer, updateOffer, acceptOffer, rejectOffer } from '../../lib/offerService'
 import { formatCurrency, formatDate, getStatusTone, calculateOTRates } from '../../lib/utils'
 import { NATIONALITIES, POSITIONS } from '../../data/constants'
 import { offerLetterHTML } from '../../lib/letterTemplates'
@@ -131,7 +131,41 @@ export default function OffersPage() {
   const handleStatusChange = async (id, status) => {
     try { await updateOffer(id, { status }); setOffers(await getOffers()) } catch (err) { setLoadError(err?.message || 'Failed to refresh offers') }
   }
-  const statusColors = { draft:'neutral', sent:'info', signed:'success', rescinded:'danger' }
+  const statusColors = { draft:'neutral', sent:'info', accepted:'success', rejected:'danger', signed:'success', rescinded:'danger' }
+
+  // Accept flow — captures signed PDF before status flips
+  const [acceptingOffer, setAcceptingOffer] = useState(null)
+  const [acceptFile, setAcceptFile] = useState(null)
+  const [acceptBusy, setAcceptBusy] = useState(false)
+  const [acceptError, setAcceptError] = useState(null)
+  const openAccept = (offer) => { setAcceptingOffer(offer); setAcceptFile(null); setAcceptError(null) }
+  const closeAccept = () => { setAcceptingOffer(null); setAcceptFile(null); setAcceptError(null); setAcceptBusy(false) }
+  const confirmAccept = async () => {
+    if (!acceptFile) { setAcceptError('Please select the signed offer PDF before accepting'); return }
+    setAcceptBusy(true); setAcceptError(null)
+    try {
+      await acceptOffer(acceptingOffer.id, acceptFile)
+      setOffers(await getOffers())
+      setSuccessMsg(`Offer accepted — ${acceptingOffer.ref_number || acceptingOffer.full_name} moved to Onboarding`)
+      setTimeout(() => setSuccessMsg(null), 5000)
+      closeAccept()
+    } catch (err) {
+      setAcceptError(err?.message || 'Failed to accept offer')
+      setAcceptBusy(false)
+    }
+  }
+
+  const handleReject = async (offer) => {
+    if (!confirm(`Reject offer for ${offer.full_name || offer.candidate_name}? This cannot be undone.`)) return
+    try {
+      await rejectOffer(offer.id)
+      setOffers(await getOffers())
+      setSuccessMsg(`Offer rejected — ${offer.ref_number || offer.full_name}`)
+      setTimeout(() => setSuccessMsg(null), 5000)
+    } catch (err) {
+      setLoadError(err?.message || 'Failed to reject offer')
+    }
+  }
 
   return (
     <>
@@ -146,7 +180,7 @@ export default function OffersPage() {
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
-        {[['All',offers.length,'neutral'],['Draft',offers.filter(o=>o.status==='draft').length,'neutral'],['Sent',offers.filter(o=>o.status==='sent').length,'info'],['Signed',offers.filter(o=>o.status==='signed').length,'success']].map(([label,count,tone]) => (
+        {[['All',offers.length,'neutral'],['Draft',offers.filter(o=>o.status==='draft').length,'neutral'],['Sent',offers.filter(o=>o.status==='sent').length,'info'],['Accepted',offers.filter(o=>o.status==='accepted'||o.status==='signed').length,'success']].map(([label,count,tone]) => (
           <div key={label} className="stat-card" style={{cursor:'pointer'}} onClick={() => setFilter(label.toLowerCase())}>
             <div className={`num ${tone !== 'neutral' ? tone : ''}`} style={{fontSize:20}}>{count}</div>
             <div className="lbl">{label} offers</div>
@@ -158,7 +192,7 @@ export default function OffersPage() {
         <div className="toolbar">
           <select className="filter-select" value={filter} onChange={e => setFilter(e.target.value)}>
             <option value="all">All offers</option>
-            <option value="draft">Draft</option><option value="sent">Sent</option><option value="signed">Signed</option><option value="rescinded">Rescinded</option>
+            <option value="draft">Draft</option><option value="sent">Sent</option><option value="accepted">Accepted</option><option value="rejected">Rejected</option>
           </select>
         </div>
         {filtered.length === 0 ? <div className="empty-state"><h3>No offers yet</h3><p>Create your first offer letter to get started.</p></div> : (
@@ -193,9 +227,9 @@ export default function OffersPage() {
                         } catch(err) { console.error(err); alert('Letter error: ' + err.message) }
                       }}>📄 Letter</button>
                       {o.status === 'draft' && <button className="btn btn-secondary btn-sm" onClick={() => handleStatusChange(o.id,'sent')}>Mark Sent</button>}
-                      {o.status === 'sent' && <button className="btn btn-teal btn-sm" onClick={() => handleStatusChange(o.id,'signed')}>Mark Signed</button>}
-                      {o.status === 'sent' && <button className="btn btn-danger btn-sm" onClick={() => handleStatusChange(o.id,'rescinded')}>Rescind</button>}
-                      {o.status === 'signed' && <Link href="/onboarding" className="btn btn-teal btn-sm">→ Onboarding</Link>}
+                      {o.status === 'sent' && <button className="btn btn-sm" style={{background:'#16a34a',color:'#fff',fontWeight:600}} onClick={() => openAccept(o)}>✓ Accept &amp; Upload Signed Offer</button>}
+                      {o.status === 'sent' && <button className="btn btn-sm" style={{background:'#dc2626',color:'#fff',fontWeight:600}} onClick={() => handleReject(o)}>✕ Reject</button>}
+                      {(o.status === 'accepted' || o.status === 'signed') && <Link href="/onboarding" className="btn btn-teal btn-sm">→ Onboarding</Link>}
                     </div>
                   </td>
                 </tr>
@@ -269,6 +303,41 @@ export default function OffersPage() {
       )}
     </AppShell>
     {viewerHtml && <LetterViewer html={viewerHtml} refNumber={viewerRef} onClose={() => { setViewerHtml(null); setViewerRef('') }} />}
+    {acceptingOffer && (
+      <DrawerForm
+        title={`Accept offer — ${acceptingOffer.ref_number || acceptingOffer.full_name}`}
+        subtitle="Upload the signed offer letter to complete acceptance"
+        onClose={() => { if (!acceptBusy) closeAccept() }}
+        footer={
+          <div style={{display:'flex',flexDirection:'column',gap:8,width:'100%'}}>
+            {acceptError && <div style={{background:'#fee2e2',border:'1px solid #ef4444',borderRadius:6,padding:'10px 12px',color:'#991b1b',fontSize:12}}>⚠ {acceptError}</div>}
+            <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+              <button className="btn btn-secondary" onClick={closeAccept} disabled={acceptBusy}>Cancel</button>
+              <button className="btn btn-sm" style={{background:'#16a34a',color:'#fff',fontWeight:600,padding:'10px 16px'}} onClick={confirmAccept} disabled={acceptBusy || !acceptFile}>
+                {acceptBusy ? 'Uploading & accepting…' : '✓ Confirm Accept'}
+              </button>
+            </div>
+          </div>
+        }>
+        <div style={{display:'flex',flexDirection:'column',gap:14}}>
+          <div style={{background:'#ecfdf5',border:'1px solid #6ee7b7',borderRadius:6,padding:'10px 12px',fontSize:12,color:'#065f46'}}>
+            Accepting this offer will upload the signed PDF, create the worker record, and move the candidate into Onboarding. This action cannot be undone without manual database cleanup.
+          </div>
+          <div><div style={{fontSize:11,color:'var(--hint)'}}>Candidate</div><div style={{fontSize:14,fontWeight:500}}>{acceptingOffer.full_name}</div></div>
+          <div className="form-grid">
+            <div><div style={{fontSize:11,color:'var(--hint)'}}>Position</div><div style={{fontSize:13}}>{acceptingOffer.trade_role}</div></div>
+            <div><div style={{fontSize:11,color:'var(--hint)'}}>Category</div><div style={{fontSize:13}}>{acceptingOffer.category}</div></div>
+            <div><div style={{fontSize:11,color:'var(--hint)'}}>Monthly salary</div><div style={{fontSize:13}}>{formatCurrency(acceptingOffer.monthly_salary || 0)}</div></div>
+            <div><div style={{fontSize:11,color:'var(--hint)'}}>Joining date</div><div style={{fontSize:13}}>{formatDate(acceptingOffer.joining_date)}</div></div>
+          </div>
+          <div className="form-field">
+            <label className="form-label">Signed offer PDF *</label>
+            <input type="file" className="form-input" accept=".pdf,.PDF" onChange={e => { setAcceptFile(e.target.files?.[0] || null); setAcceptError(null) }} />
+            {acceptFile && <div style={{fontSize:11,color:'var(--teal)',marginTop:4}}>📎 {acceptFile.name}</div>}
+          </div>
+        </div>
+      </DrawerForm>
+    )}
     </>
   )
 }

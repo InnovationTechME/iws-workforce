@@ -12,6 +12,7 @@ import { getDocumentsByWorker, upsertDocument } from '../../../lib/documentServi
 import { getDocumentTemplate, generateDocumentFilename } from '../../../lib/documentRegister'
 import DocumentUploadForm from '../../../components/DocumentUploadForm'
 import { supabase } from '../../../lib/supabaseClient'
+import { getSignedUrl, uploadWorkerDocument } from '../../../lib/storageService'
 import { getAttendanceByWorker } from '../../../lib/attendanceService'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
 import { offerLetterHTML, warningLetterHTML, experienceLetterHTML, terminationWithNoticeHTML, terminationWithoutNoticeHTML, resignationAcceptanceHTML, policyManualHTML, TERMINATION_GROUNDS_LIST } from '../../../lib/letterTemplates'
@@ -29,7 +30,7 @@ export default function WorkerDetailPage() {
   const [viewerRef, setViewerRef] = useState('')
   const [letterLang, setLetterLang] = useState('english')
   const [selectedDoc, setSelectedDoc] = useState(null)
-  const [docForm, setDocForm] = useState({ issue_date:'', expiry_date:'', file_name:null, file_original:null, notes:'' })
+  const [docForm, setDocForm] = useState({ issue_date:'', expiry_date:'', file_name:null, file_original:null, file_blob:null, notes:'' })
   const [openUploadFor, setOpenUploadFor] = useState(null)
   const [saveBanner, setSaveBanner] = useState(null)
   const [showTerminationForm, setShowTerminationForm] = useState(false)
@@ -38,6 +39,19 @@ export default function WorkerDetailPage() {
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
+  const [viewingRef, setViewingRef] = useState(null)
+
+  const handleView = async (fileRef) => {
+    if (!fileRef) return
+    setViewingRef(fileRef)
+    try {
+      const url = await getSignedUrl(fileRef)
+      if (!url) { setSaveBanner('File no longer available — please re-upload'); setTimeout(() => setSaveBanner(null), 4000); return }
+      window.open(url, '_blank')
+    } finally {
+      setViewingRef(null)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -321,7 +335,7 @@ export default function WorkerDetailPage() {
                               style={{cursor:'pointer',fontSize:10,fontWeight:600,color:has?'#64748b':'#0d9488',background:has?'#f8fafc':'#f0fdfa',border:`1px solid ${has?'#e2e8f0':'#99f6e4'}`,padding:'3px 8px',borderRadius:6,whiteSpace:'nowrap'}}>
                               {isOpen ? '✕ Close' : has ? '↻ Replace' : '↑ Upload'}
                             </button>
-                            <button className="btn btn-ghost btn-sm" style={{fontSize:10,padding:'3px 8px'}} onClick={() => { setSelectedDoc(d); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:d.expiry_date||'', file_name:null, file_original:null, notes:'' }) }}>Details</button>
+                            <button className="btn btn-ghost btn-sm" style={{fontSize:10,padding:'3px 8px'}} onClick={() => { setSelectedDoc(d); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:d.expiry_date||'', file_name:null, file_original:null, file_blob:null, notes:'' }) }}>Details</button>
                           </div>
                           {isWC && has && !wcOk && (
                             <label style={{fontSize:10,color:'#dc2626',display:'flex',alignItems:'center',gap:4,marginTop:4,cursor:'pointer'}}>
@@ -339,7 +353,7 @@ export default function WorkerDetailPage() {
                               docType={d.doc_type}
                               docLabel={d.label}
                               isBlocking={d.is_blocking}
-                              workerId={id}
+                              worker={worker}
                               onCancel={() => setOpenUploadFor(null)}
                               onSaved={async () => { setDocs(await getDocumentsByWorker(id)); setOpenUploadFor(null) }}
                             />
@@ -370,7 +384,10 @@ export default function WorkerDetailPage() {
                       } else { statusLabel='Valid'; statusTone='success' }
                     }
                     const compliance = ['health_insurance','health_card'].includes(d.doc_type)
+                    const isBlobDead = d.file_url && d.file_url.startsWith('blob:')
+                    const hasStorageRef = d.file_url && d.file_url.includes('::')
                     const fileName = d.file_url ? d.file_url.split('/').pop() : generateDocumentFilename(worker, d.doc_type, 'pdf')
+                    const isViewing = viewingRef === d.file_url
                     const isOpen = openUploadFor === 'row:' + d.doc_type
                     return (
                       <React.Fragment key={d.id}>
@@ -382,7 +399,15 @@ export default function WorkerDetailPage() {
                         <td><StatusBadge label={statusLabel} tone={statusTone} /></td>
                         <td style={{fontSize:12,color:statusTone==='danger'?'var(--danger)':statusTone==='warning'?'var(--warning)':'var(--muted)'}}>{d.expiry_date ? formatDate(d.expiry_date) : '—'}</td>
                         <td style={{fontSize:11,color:has?'var(--text)':'var(--hint)'}}>
-                          {has ? <a href={d.file_url} target="_blank" rel="noreferrer" style={{color:'#0d9488'}}>📎 {fileName}</a> : <span style={{fontStyle:'italic'}}>Not uploaded</span>}
+                          {isBlobDead ? (
+                            <span style={{color:'#dc2626',fontStyle:'italic'}}>File expired — re-upload needed</span>
+                          ) : hasStorageRef ? (
+                            <button type="button" onClick={() => handleView(d.file_url)} disabled={isViewing} style={{background:'transparent',border:'none',padding:0,cursor:'pointer',color:'#0d9488',textDecoration:'underline',fontSize:11}}>
+                              {isViewing ? 'Loading…' : `📎 View ${fileName}`}
+                            </button>
+                          ) : has ? (
+                            <a href={d.file_url} target="_blank" rel="noreferrer" style={{color:'#0d9488'}}>📎 {fileName}</a>
+                          ) : <span style={{fontStyle:'italic'}}>Not uploaded</span>}
                         </td>
                         <td>
                           <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
@@ -392,7 +417,7 @@ export default function WorkerDetailPage() {
                               style={{cursor:'pointer',fontSize:11,fontWeight:600,color:has?'#64748b':'#0d9488',background:has?'#f8fafc':'#f0fdfa',border:`1px solid ${has?'#e2e8f0':'#99f6e4'}`,padding:'4px 10px',borderRadius:6,whiteSpace:'nowrap'}}>
                               {isOpen ? '✕ Close' : has ? '↻ Replace' : '↑ Upload'}
                             </button>
-                            <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={() => { setSelectedDoc(d); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:d.expiry_date||'', file_name:null, file_original:null, notes:'' }) }}>Details</button>
+                            <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={() => { setSelectedDoc(d); setDocForm({ issue_date:new Date().toISOString().split('T')[0], expiry_date:d.expiry_date||'', file_name:null, file_original:null, file_blob:null, notes:'' }) }}>Details</button>
                           </div>
                           {d.doc_type === 'workmen_compensation' && has && d.highlighted_name_confirmed !== true && (
                             <label style={{fontSize:10,color:'#dc2626',display:'flex',alignItems:'center',gap:4,marginTop:4,cursor:'pointer'}}>
@@ -417,7 +442,7 @@ export default function WorkerDetailPage() {
                               docType={d.doc_type}
                               docLabel={d.label}
                               isBlocking={d.is_blocking}
-                              workerId={id}
+                              worker={worker}
                               onCancel={() => setOpenUploadFor(null)}
                               onSaved={async () => { setDocs(await getDocumentsByWorker(id)); setOpenUploadFor(null) }}
                             />
@@ -454,9 +479,19 @@ export default function WorkerDetailPage() {
                       <div><div style={{fontSize:11,color:'var(--hint)'}}>Expiry date</div><div style={{fontSize:13,fontWeight:500}}>{formatDate(selectedDoc.expiry_date)}</div></div>
                     </div>
                     {selectedDoc.file_url ? (
-                      <div style={{marginTop:10,padding:'8px 12px',background:'#ecfdf5',border:'1px solid #6ee7b7',borderRadius:6,fontSize:12}}>
-                        <a href={selectedDoc.file_url} target="_blank" rel="noreferrer" style={{color:'#065f46'}}>📎 {selectedDoc.file_url.split('/').pop()}</a>
-                      </div>
+                      selectedDoc.file_url.startsWith('blob:') ? (
+                        <div style={{marginTop:10,padding:'8px 12px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:6,fontSize:12,color:'#991b1b'}}>⚠ File expired — please re-upload below</div>
+                      ) : selectedDoc.file_url.includes('::') ? (
+                        <div style={{marginTop:10,padding:'8px 12px',background:'#ecfdf5',border:'1px solid #6ee7b7',borderRadius:6,fontSize:12}}>
+                          <button type="button" onClick={() => handleView(selectedDoc.file_url)} disabled={viewingRef === selectedDoc.file_url} style={{background:'transparent',border:'none',padding:0,cursor:'pointer',color:'#065f46',textDecoration:'underline'}}>
+                            {viewingRef === selectedDoc.file_url ? 'Loading…' : `📎 View ${selectedDoc.file_url.split('/').pop()}`}
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{marginTop:10,padding:'8px 12px',background:'#ecfdf5',border:'1px solid #6ee7b7',borderRadius:6,fontSize:12}}>
+                          <a href={selectedDoc.file_url} target="_blank" rel="noreferrer" style={{color:'#065f46'}}>📎 {selectedDoc.file_url.split('/').pop()}</a>
+                        </div>
+                      )
                     ) : (
                       <div style={{marginTop:10,padding:'8px 12px',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:6,fontSize:12,color:'#92400e'}}>No file uploaded yet</div>
                     )}
@@ -472,7 +507,7 @@ export default function WorkerDetailPage() {
                           const file = e.target.files[0]
                           if (!file) return
                           const autoName = generateDocumentFilename(worker, selectedDoc.doc_type, file.name)
-                          setDocForm({...docForm, file_name:autoName, file_original:file.name})
+                          setDocForm({...docForm, file_name:autoName, file_original:file.name, file_blob:file})
                         }} />
                         {docForm.file_name && <div style={{fontSize:11,color:'var(--teal)',marginTop:4}}>📎 {docForm.file_name}{docForm.file_original && docForm.file_original !== docForm.file_name ? <span style={{color:'var(--hint)',marginLeft:6}}>({docForm.file_original})</span> : ''}</div>}
                       </div>
@@ -489,7 +524,12 @@ export default function WorkerDetailPage() {
                           newStatus = daysUntil < 0 ? 'expired' : daysUntil <= 30 ? 'expiring_soon' : 'valid'
                         }
                         try {
-                          await upsertDocument(id, selectedDoc.doc_type, { label:selectedDoc.label, is_blocking:selectedDoc.is_blocking, issue_date:docForm.issue_date || null, expiry_date:docForm.expiry_date || null, file_url:docForm.file_name || selectedDoc.file_url || null, status:newStatus })
+                          let fileUrl = selectedDoc.file_url || null
+                          if (docForm.file_blob) {
+                            const { path, bucket } = await uploadWorkerDocument(worker, selectedDoc.doc_type, docForm.file_blob)
+                            fileUrl = `${bucket}::${path}`
+                          }
+                          await upsertDocument(id, selectedDoc.doc_type, { label:selectedDoc.label, is_blocking:selectedDoc.is_blocking, issue_date:docForm.issue_date || null, expiry_date:docForm.expiry_date || null, file_url:fileUrl, status:newStatus })
                           setDocs(await getDocumentsByWorker(id))
                           setSelectedDoc(null)
                         } catch (err) { setSaveBanner('Save failed: ' + err.message); setTimeout(() => setSaveBanner(null), 4000) }
