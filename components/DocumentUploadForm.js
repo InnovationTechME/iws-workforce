@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { uploadWorkerDocument } from '../lib/storageService'
 
 export const EXPIRY_REQUIRED = ['uae_visa', 'emirates_id', 'passport_copy', 'health_insurance', 'workmen_compensation', 'medical_fitness', 'labour_card', 'iloe_certificate']
 export const NO_EXPIRY = ['passport_photo', 'offer_letter', 'employment_contract', 'worker_policy_manual', 'passport_safekeeping']
@@ -21,16 +22,18 @@ export function validateUploadForm(file, expiryDate, highlightConfirmed, docType
   return errors
 }
 
-export async function saveDocument(workerId, docType, docLabel, isBlocking, file, expiryDate, notes, highlightConfirmed) {
+export async function saveDocument(worker, docType, docLabel, isBlocking, file, expiryDate, notes, highlightConfirmed) {
+  const { path, bucket } = await uploadWorkerDocument(worker, docType, file)
+  const fileRef = `${bucket}::${path}`
   const { error } = await supabase
     .from('documents')
     .upsert({
-      worker_id: workerId,
+      worker_id: worker.id,
       doc_type: docType,
       label: docLabel,
       status: 'valid',
       is_blocking: isBlocking,
-      file_url: URL.createObjectURL(file),
+      file_url: fileRef,
       expiry_date: expiryDate || null,
       notes: notes || null,
       uploaded_at: new Date().toISOString(),
@@ -41,7 +44,8 @@ export async function saveDocument(workerId, docType, docLabel, isBlocking, file
   if (error) throw new Error(error.message)
 }
 
-export default function DocumentUploadForm({ docType, docLabel, isBlocking, workerId, onCancel, onSaved }) {
+export default function DocumentUploadForm({ docType, docLabel, isBlocking, worker, workerId, onCancel, onSaved }) {
+  const effectiveWorker = worker || (workerId ? { id: workerId } : null)
   const [file, setFile] = useState(null)
   const [expiry, setExpiry] = useState('')
   const [notes, setNotes] = useState('')
@@ -60,7 +64,10 @@ export default function DocumentUploadForm({ docType, docLabel, isBlocking, work
     if (errs.length) return
     setSaving(true)
     try {
-      await saveDocument(workerId, docType, docLabel, isBlocking, file, expiry, notes, highlight)
+      if (!effectiveWorker || !effectiveWorker.worker_number) {
+        throw new Error('Worker data missing — cannot upload (please reload the page)')
+      }
+      await saveDocument(effectiveWorker, docType, docLabel, isBlocking, file, expiry, notes, highlight)
       onSaved()
     } catch (e) {
       setSaveError(e.message)
@@ -112,7 +119,7 @@ export default function DocumentUploadForm({ docType, docLabel, isBlocking, work
 
       <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
         <button className="btn btn-secondary btn-sm" onClick={onCancel} disabled={saving}>Cancel</button>
-        <button className="btn btn-teal btn-sm" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save Document'}</button>
+        <button className="btn btn-teal btn-sm" onClick={handleSave} disabled={saving}>{saving ? 'Uploading…' : 'Save Document'}</button>
       </div>
     </div>
   )

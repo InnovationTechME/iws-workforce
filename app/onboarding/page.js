@@ -772,7 +772,7 @@ function ChecklistDrawer({ worker, docs, blockingStatus, onClose, onConvert, onD
                   docType={t.doc_type}
                   docLabel={t.label}
                   isBlocking={t.is_blocking}
-                  workerId={worker.id}
+                  worker={worker}
                   onCancel={() => setOpenUploadFor(null)}
                   onSaved={async () => { await refreshDocs(); setOpenUploadFor(null) }}
                 />
