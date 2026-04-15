@@ -1,14 +1,12 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
-import DrawerForm from '../../components/DrawerForm'
-import { addWorkerWithC3Task, makeId } from '../../lib/mockStore'
 import { getWorkers } from '../../lib/workerService'
 import { formatCurrency, getStatusTone } from '../../lib/utils'
-import { POSITIONS } from '../../data/constants'
 
 export default function WorkersPage() {
   const [workers, setWorkers] = useState([])
@@ -17,8 +15,7 @@ export default function WorkersPage() {
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
-  const [showDrawer, setShowDrawer] = useState(false)
-  const [form, setForm] = useState({ full_name:'', trade_role:'', category:'Permanent Staff', nationality:'', passport_number:'', mobile_number:'', email:'', payroll_type:'monthly', monthly_salary:'', hourly_rate:'', fixed_allowance:'', project_site:'', visa_company:'Innovation Technologies', subcontractor_company:'', subcontractor_billing_rate:'', subcontractor_cost_rate:'' })
+  const router = useRouter()
 
   useEffect(() => {
     const load = async () => {
@@ -44,22 +41,18 @@ export default function WorkersPage() {
     return matchSearch && matchCat && matchStatus
   })
 
-  const handleAdd = async () => {
-    const seq = String(workers.length + 1).padStart(4, '0')
-    const worker = { ...form, id: makeId('w'), worker_number: `IWS-2026-${seq}`, status: 'Pre-employment', active: false, onboarding_status: 'Pre-employment', joining_date: null, leaving_date: null, blacklisted: false, monthly_salary: Number(form.monthly_salary)||0, hourly_rate: Number(form.hourly_rate)||0, fixed_allowance: Number(form.fixed_allowance)||0, subcontractor_billing_rate: Number(form.subcontractor_billing_rate)||0, subcontractor_cost_rate: Number(form.subcontractor_cost_rate)||0, ot_eligible: true, holiday_ot_eligible: true, leave_eligible: true }
-    addWorkerWithC3Task(worker)
-    try { setWorkers(await getWorkers() || []) } catch (err) { console.error('Failed to refresh workers:', err) }
-    setShowDrawer(false)
-    setForm({ full_name:'', trade_role:'', category:'Permanent Staff', nationality:'', passport_number:'', mobile_number:'', email:'', payroll_type:'monthly', monthly_salary:'', hourly_rate:'', fixed_allowance:'', project_site:'', visa_company:'Innovation Technologies', subcontractor_company:'', subcontractor_billing_rate:'', subcontractor_cost_rate:'' })
-  }
-
   const categories = ['Permanent Staff', 'Contract Worker', 'Subcontract Worker', 'Office Staff']
   const statuses = ['Active', 'On Leave', 'Pre-employment', 'Inactive']
+
+  // §5.3.5 — no worker can be created without an onboarding row. The Workers
+  // register Add button re-routes to the onboarding track selector; direct
+  // staff from there bounce to the Offers flow.
+  const handleAddClick = () => router.push('/onboarding?add=1')
 
   return (
     <AppShell pageTitle="Workers">
       <PageHeader eyebrow="Workers" title="Worker register" description="All workers — direct employees, contracted hourly, subcontractors, and office staff."
-        actions={<button className="btn btn-primary" onClick={() => setShowDrawer(true)}>+ Add Worker</button>} />
+        actions={<button className="btn btn-primary" onClick={handleAddClick}>+ Add Worker</button>} />
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(5,minmax(0,1fr))',gap:10,marginBottom:4}}>
         {[['All',workers.filter(w=>w.active!==false).length, workers.filter(w=>w.active===false).length],['Permanent Staff',workers.filter(w=>w.category==='Permanent Staff'&&w.active!==false).length, workers.filter(w=>w.category==='Permanent Staff'&&w.active===false).length],['Contract',workers.filter(w=>w.category==='Contract Worker'&&w.active!==false).length, workers.filter(w=>w.category==='Contract Worker'&&w.active===false).length],['Subcontract Worker',workers.filter(w=>w.category==='Subcontract Worker'&&w.active!==false).length, workers.filter(w=>w.category==='Subcontract Worker'&&w.active===false).length],['Office Staff',workers.filter(w=>w.category==='Office Staff'&&w.active!==false).length, workers.filter(w=>w.category==='Office Staff'&&w.active===false).length]].map(([label,activeCount,inactiveCount]) => (
@@ -110,38 +103,6 @@ export default function WorkersPage() {
           </div>
         )}
       </div>
-
-      {showDrawer && (
-        <DrawerForm title="Add Worker" subtitle="Create a new worker record" onClose={() => setShowDrawer(false)}
-          footer={<div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary" onClick={() => setShowDrawer(false)}>Cancel</button><button className="btn btn-primary" onClick={handleAdd}>Add Worker</button></div>}>
-          <div style={{display:'flex',flexDirection:'column',gap:14}}>
-            <div className="form-grid">
-              <div className="form-field"><label className="form-label">Full name *</label><input className="form-input" value={form.full_name} onChange={e => setForm({...form, full_name:e.target.value})} placeholder="Full name" /></div>
-              <div className="form-field"><label className="form-label">Trade / role *</label><select className="form-select" value={form.trade_role} onChange={e => setForm({...form, trade_role:e.target.value})}><option value="">Select position</option>{POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}</select></div>
-              <div className="form-field"><label className="form-label">Category</label><select className="form-select" value={form.category} onChange={e => setForm({...form, category:e.target.value})}>{categories.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-              <div className="form-field"><label className="form-label">Nationality</label><input className="form-input" value={form.nationality} onChange={e => setForm({...form, nationality:e.target.value})} placeholder="Indian, Pakistani, etc." /></div>
-              <div className="form-field"><label className="form-label">Passport number</label><input className="form-input" value={form.passport_number} onChange={e => setForm({...form, passport_number:e.target.value})} /></div>
-              <div className="form-field"><label className="form-label">Mobile</label><input className="form-input" value={form.mobile_number} onChange={e => setForm({...form, mobile_number:e.target.value})} placeholder="+971..." /></div>
-              <div className="form-field"><label className="form-label">Email</label><input className="form-input" value={form.email} onChange={e => setForm({...form, email:e.target.value})} /></div>
-              <div className="form-field"><label className="form-label">Project site</label><input className="form-input" value={form.project_site} onChange={e => setForm({...form, project_site:e.target.value})} /></div>
-              <div className="form-field"><label className="form-label">Payroll type</label><select className="form-select" value={form.payroll_type} onChange={e => setForm({...form, payroll_type:e.target.value})}><option value="monthly">Monthly salary</option><option value="hourly">Hourly rate</option></select></div>
-              {form.payroll_type === 'monthly' ? <div className="form-field"><label className="form-label">Monthly salary (AED)</label><input className="form-input" type="number" value={form.monthly_salary} onChange={e => setForm({...form, monthly_salary:e.target.value})} /></div> : <div className="form-field"><label className="form-label">Hourly rate (AED)</label><input className="form-input" type="number" value={form.hourly_rate} onChange={e => setForm({...form, hourly_rate:e.target.value})} /></div>}
-              <div className="form-field"><label className="form-label">Fixed allowance (AED)</label><input className="form-input" type="number" value={form.fixed_allowance} onChange={e => setForm({...form, fixed_allowance:e.target.value})} /></div>
-              <div className="form-field"><label className="form-label">Visa company</label><input className="form-input" value={form.visa_company} onChange={e => setForm({...form, visa_company:e.target.value})} /></div>
-            </div>
-            {form.category === 'Subcontract Worker' && (
-              <div style={{padding:'12px',background:'var(--surface)',borderRadius:8,border:'0.5px solid var(--border)'}}>
-                <div style={{fontSize:12,fontWeight:500,marginBottom:10,color:'var(--muted)'}}>Subcontractor details</div>
-                <div className="form-grid">
-                  <div className="form-field"><label className="form-label">Subcontractor company</label><input className="form-input" value={form.subcontractor_company} onChange={e => setForm({...form, subcontractor_company:e.target.value})} /></div>
-                  <div className="form-field"><label className="form-label">Billing rate (AED/hr)</label><input className="form-input" type="number" value={form.subcontractor_billing_rate} onChange={e => setForm({...form, subcontractor_billing_rate:e.target.value})} /></div>
-                  <div className="form-field"><label className="form-label">Cost rate (AED/hr)</label><input className="form-input" type="number" value={form.subcontractor_cost_rate} onChange={e => setForm({...form, subcontractor_cost_rate:e.target.value})} /></div>
-                </div>
-              </div>
-            )}
-          </div>
-        </DrawerForm>
-      )}
     </AppShell>
   )
 }

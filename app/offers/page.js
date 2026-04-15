@@ -1,18 +1,23 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import Link from 'next/link'
+import { useSearchParams, useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
 import { checkBlacklist, makeId, generateRefNumber, addLetter } from '../../lib/mockStore'
 import { getOffers, addOffer, updateOffer, acceptOffer, rejectOffer } from '../../lib/offerService'
-import { formatCurrency, formatDate, getStatusTone, calculateOTRates } from '../../lib/utils'
+import { formatCurrency, formatDate, getStatusTone, calculateOTRates, passportExpiryGap, looksLikeCompanyName } from '../../lib/utils'
 import { NATIONALITIES, POSITIONS } from '../../data/constants'
 import { offerLetterHTML } from '../../lib/letterTemplates'
 import LetterViewer from '../../components/LetterViewer'
 
-export default function OffersPage() {
+export default function OffersPageWrapper() {
+  return <Suspense fallback={null}><OffersPage /></Suspense>
+}
+
+function OffersPage() {
   const [offers, setOffers] = useState([])
   const [filter, setFilter] = useState('all')
   const [showDrawer, setShowDrawer] = useState(false)
@@ -43,6 +48,8 @@ export default function OffersPage() {
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
+  const searchParams = useSearchParams()
+  const router = useRouter()
 
   useEffect(() => {
     let cancelled = false
@@ -61,17 +68,29 @@ export default function OffersPage() {
     return () => { cancelled = true }
   }, [])
 
+  // ?new=1 auto-opens the Create Offer drawer (used by the /workers Add Worker
+  // re-route and by the /onboarding Direct Staff track redirect).
+  useEffect(() => {
+    if (searchParams?.get('new') === '1') {
+      openDrawer()
+      router.replace('/offers')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
   const filtered = filter === 'all' ? offers : offers.filter(o => o.status === filter)
 
-  // Passport expiry validation — 7 month minimum for visa
+  // Passport expiry validation — must be at least 7 months after the joining date (§5.3.6)
   const passportExpiryStatus = (() => {
     if (!form.passport_expiry) return { valid: null, message: 'Passport expiry required — needed for visa eligibility check', tone: 'warning' }
-    const expiry = new Date(form.passport_expiry)
-    const minimum = new Date()
-    minimum.setMonth(minimum.getMonth() + 7)
-    const monthsRemaining = Math.round((expiry - new Date()) / (1000*60*60*24*30.44))
-    if (expiry < minimum) return { valid: false, message: `Passport expires ${formatDate(form.passport_expiry)} — only ${Math.max(0, monthsRemaining)} months remaining. Minimum 7 months required for visa application. This offer cannot proceed.`, tone: 'danger' }
-    return { valid: true, message: `Valid for visa application (${monthsRemaining} months remaining)`, tone: 'success' }
+    if (!form.start_date) return { valid: null, message: 'Enter the start (joining) date to validate passport expiry', tone: 'warning' }
+    const gap = passportExpiryGap(form.passport_expiry, form.start_date, 7)
+    if (gap.ok) return { valid: true, message: `Valid — passport expires ${formatDate(form.passport_expiry)} (≥7 months from joining)`, tone: 'success' }
+    if (gap.reason === 'too_soon') {
+      return { valid: false, tone: 'danger',
+        message: `Passport expires before the 7-month minimum from joining date (${formatDate(form.start_date)}). Only ${gap.monthsFromJoining} months of validity at joining. Renew passport before issuing offer.` }
+    }
+    return { valid: false, tone: 'danger', message: 'Passport expiry date is invalid' }
   })()
   const passportExpiryBlocked = passportExpiryStatus.valid === false
 
@@ -93,13 +112,19 @@ export default function OffersPage() {
     const errors = []
     if (!form.first_name?.trim()) errors.push('First name is required')
     if (!form.last_name?.trim()) errors.push('Last name is required')
+    const composedName = `${form.first_name || ''} ${form.last_name || ''}`.trim()
+    if (looksLikeCompanyName(form.first_name) || looksLikeCompanyName(form.last_name) || looksLikeCompanyName(composedName)) {
+      errors.push("Enter the candidate's name, not the company name.")
+    }
     if (!form.passport_number?.trim()) errors.push('Passport number is required')
     if (!form.nationality) errors.push('Nationality is required')
     if (!form.trade_role) errors.push('Position / trade is required')
     if (!basicAmt) errors.push('Monthly salary is required')
     if (!form.passport_expiry) errors.push('Passport expiry date is required')
-    if (passportExpiryBlocked) errors.push('Passport expiry too soon for visa application (minimum 7 months required)')
     if (!form.start_date) errors.push('Start date is required')
+    if (passportExpiryBlocked && form.passport_expiry && form.start_date) {
+      errors.push('Passport expiry is before the 7-month minimum from joining date')
+    }
     if (errors.length > 0) { setFormErrors(errors); return }
     setFormErrors([])
     setFormError(null)
@@ -201,7 +226,13 @@ export default function OffersPage() {
             <tbody>
               {filtered.map(o => (
                 <tr key={o.id}>
-                  <td><div style={{fontWeight:500}}>{o.full_name || o.candidate_name}</div><div style={{fontSize:11,color:'var(--hint)'}}>{o.nationality}</div></td>
+                  <td>
+                    <div style={{fontWeight:500}}>
+                      {o.full_name ? o.full_name : <span style={{color:'var(--hint)',fontStyle:'italic'}}>(unnamed)</span>}
+                      {looksLikeCompanyName(o.full_name) && <span style={{marginLeft:6,color:'#b45309',fontSize:11,fontWeight:500}} title="Candidate name is the company name — please update">⚠️ (please update)</span>}
+                    </div>
+                    <div style={{fontSize:11,color:'var(--hint)'}}>{o.nationality}</div>
+                  </td>
                   <td>{o.trade_role || o.position}</td>
                   <td><StatusBadge label={o.category} tone="neutral" /></td>
                   <td><div style={{fontSize:12}}>{formatCurrency(o.monthly_salary || o.salary_monthly || 0)}/mo</div></td>
