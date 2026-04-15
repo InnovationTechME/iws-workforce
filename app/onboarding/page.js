@@ -11,6 +11,7 @@ import { getSuppliers, getSupplierRates } from '../../lib/supplierService'
 import { checkBlacklist } from '../../lib/blacklistService'
 import { getDocumentTemplate, initialiseWorkerDocuments } from '../../lib/documentRegister'
 import DocumentUploadForm from '../../components/DocumentUploadForm'
+import OnboardingDocSection from '../../components/onboarding/OnboardingDocSection'
 import { NATIONALITIES, POSITIONS } from '../../data/constants'
 import { formatDate } from '../../lib/utils'
 
@@ -342,10 +343,18 @@ export default function OnboardingPage() {
   }
 
   const blockingStatus = (worker, docs) => {
-    const tpl = getDocumentTemplate(worker).filter(t => t.is_blocking)
+    // Round C (§5.3.1 / §5.3.3): Labour Card is WARNING, not blocking — skip
+    // it here. Medical Fitness requires medical_result='pass' (no file).
+    // Emirates ID requires both front_file_url and back_file_url.
+    const tpl = getDocumentTemplate(worker).filter(t => t.is_blocking && t.kind !== 'labour_card')
     const done = tpl.filter(t => {
       const d = docs.find(x => x.doc_type === t.doc_type)
       if (!d) return false
+      if (t.kind === 'toggle' || t.doc_type === 'medical_fitness') return d.medical_result === 'pass'
+      if (t.kind === 'emirates_id' || t.doc_type === 'emirates_id') {
+        if (!d.front_file_url || !d.back_file_url) return false
+        return d.status === 'valid' || d.status === 'expiring_soon'
+      }
       if (d.status !== 'valid' && d.status !== 'expiring_soon') return false
       if (t.requires_highlight && d.highlighted_name_confirmed !== true) return false
       return true
@@ -732,9 +741,17 @@ function ChecklistDrawer({ worker, docs, blockingStatus, onClose, onConvert, onD
       <div style={{display:'flex',flexDirection:'column',gap:6}}>
         {tpl.map(t => {
           const d = docs.find(x => x.doc_type === t.doc_type)
-          const ok = d && (d.status === 'valid' || d.status === 'expiring_soon') && (!t.requires_highlight || d.highlighted_name_confirmed === true)
-          const isMissing = !d || d.status === 'missing' || !d.file_url
+          const isToggle = t.kind === 'toggle' || t.doc_type === 'medical_fitness'
+          const isEid = t.kind === 'emirates_id' || t.doc_type === 'emirates_id'
+          let ok = false
+          if (isToggle) ok = d?.medical_result === 'pass'
+          else if (isEid) ok = !!(d && d.front_file_url && d.back_file_url && (d.status === 'valid' || d.status === 'expiring_soon'))
+          else ok = !!(d && (d.status === 'valid' || d.status === 'expiring_soon') && (!t.requires_highlight || d.highlighted_name_confirmed === true))
+          const hasEvidence = !!(d && (d.file_url || d.front_file_url || d.medical_result))
+          const isMissing = !hasEvidence
+          const tier = t.is_blocking ? 'BLOCKING' : (t.warning ? 'WARNING' : 'OPTIONAL')
           const isOpen = openUploadFor === t.doc_type
+          const statusLabel = d?.medical_result === 'fail' ? 'FAIL' : (ok ? 'On file' : (d?.status || 'missing'))
           return (
             <div key={t.doc_type}>
               <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',border:'1px solid var(--border)',borderRadius:6,background:ok?'#f0fdf4':'#fff',flexWrap:'wrap'}}>
@@ -755,22 +772,22 @@ function ChecklistDrawer({ worker, docs, blockingStatus, onClose, onConvert, onD
                   )}
                   {t.note && <div style={{fontSize:11,color:'var(--hint)',fontStyle:'italic'}}>{t.note}</div>}
                 </div>
-                {t.is_blocking && <span style={{fontSize:9,fontWeight:700,color:'#dc2626',background:'#fee2e2',padding:'2px 6px',borderRadius:10}}>BLOCKING</span>}
-                {!t.is_blocking && <span style={{fontSize:9,fontWeight:700,color:'#64748b',background:'#f1f5f9',padding:'2px 6px',borderRadius:10}}>OPTIONAL</span>}
-                <span style={{fontSize:11,color:ok?'var(--success)':'var(--hint)',fontWeight:500,minWidth:50,textAlign:'right'}}>{ok ? 'On file' : (d?.status || 'missing')}</span>
+                {tier === 'BLOCKING' && <span style={{fontSize:9,fontWeight:700,color:'#dc2626',background:'#fee2e2',padding:'2px 6px',borderRadius:10}}>BLOCKING</span>}
+                {tier === 'WARNING'  && <span style={{fontSize:9,fontWeight:700,color:'#92400e',background:'#fef3c7',padding:'2px 6px',borderRadius:10}}>WARNING</span>}
+                {tier === 'OPTIONAL' && <span style={{fontSize:9,fontWeight:700,color:'#64748b',background:'#f1f5f9',padding:'2px 6px',borderRadius:10}}>OPTIONAL</span>}
+                <span style={{fontSize:11,color:ok?'var(--success)':(d?.medical_result==='fail'?'#dc2626':'var(--hint)'),fontWeight:500,minWidth:50,textAlign:'right'}}>{statusLabel}</span>
                 <button
                   type="button"
                   onClick={() => toggleUpload(t.doc_type)}
                   style={{cursor:'pointer',fontSize:11,fontWeight:600,color:isMissing?'#0d9488':'#64748b',background:isMissing?'#f0fdfa':'#f8fafc',border:`1px solid ${isMissing?'#99f6e4':'#e2e8f0'}`,padding:'4px 10px',borderRadius:6,whiteSpace:'nowrap'}}>
-                  {isOpen ? '✕ Close' : isMissing ? '↑ Upload' : '↻ Replace'}
+                  {isOpen ? '✕ Close' : isToggle ? (ok ? '↻ Re-record' : '➤ Record') : isMissing ? '↑ Upload' : '↻ Replace'}
                 </button>
               </div>
               {isOpen && (
-                <DocumentUploadForm
-                  docType={t.doc_type}
-                  docLabel={t.label}
-                  isBlocking={t.is_blocking}
+                <OnboardingDocSection
                   worker={worker}
+                  template={t}
+                  existing={d || null}
                   onCancel={() => setOpenUploadFor(null)}
                   onSaved={async () => { await refreshDocs(); setOpenUploadFor(null) }}
                 />

@@ -3,7 +3,7 @@
 > Per CLAUDE.md §4 — current state, what's built, what's broken, active priority.
 > Update at the end of every session. Stale state is worse than none.
 
-Last updated: 2026-04-14
+Last updated: 2026-04-15
 
 ---
 
@@ -22,6 +22,70 @@ Two clients exist:
 
 Env variables consumed: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
 `SUPABASE_SERVICE_ROLE_KEY`.
+
+---
+
+## Round C — Onboarding checklist restructure (IT Direct Staff track)
+
+Landed on branch `feat/onboarding-checklist-restructure`.
+
+**What changed:**
+- `lib/documentRegister.js` — `direct_staff_permanent` and
+  `direct_staff_office` templates reordered to match CLAUDE.md §5.3.1
+  (12-item order, Medical Fitness at #4, Labour Card demoted to WARNING
+  at #7). `health_card` dropped from both direct-staff templates.
+  Contract-worker and subcontractor templates untouched.
+- `lib/storageService.js` — new `buildOnboardingPath(worker, docType, file, ref)`
+  implements §5.3.2 path shape `{worker_number}/{doc_type}/{name_safe}_{doc_type}_{ref}.{ext}`.
+  `uploadWorkerDocument` accepts optional 4th `ref` arg; legacy callers
+  without a ref keep today's path shape for backward compatibility.
+  `getSignedUrl` now transparently handles JSON-array multi-file refs;
+  new `getSignedUrls` returns the whole array.
+- `lib/onboardingService.js` — new `saveOnboardingDoc`,
+  `setMedicalFitnessPass`, `setMedicalFitnessFail`, `validateBlockingDocs`.
+  `completeOnboarding` now validates blocking evidence and stamps
+  `uploaded_at` on any blocking row that lacks it. Medical Fitness Fail
+  follows CLAUDE.md §5.3.4: `workers.medical_failed=true`,
+  `workers.status='inactive'`, HR Inbox task `task_type='medical_fail_review'`,
+  **no auto-blacklist**. The denormalised `workers` identity/policy columns
+  stay in sync via `denormalisedWorkerUpdates` on each save.
+- `lib/offerService.js` — `acceptOffer` now upserts a `documents` row with
+  `doc_type='offer_letter'`, `file_url='letter-archive::offers/…'`,
+  `status='valid'`, `is_blocking=false` so checklist item #1 renders with
+  evidence after Accept.
+- `components/onboarding/` — eight per-doc-type forms
+  (PassportCopyForm, PassportPhotoUpload, UAEVisaForm, EmiratesIDForm,
+  MedicalFitnessToggle, LabourCardForm, HealthInsuranceForm,
+  WorkmensCompForm) plus `OnboardingDocSection` dispatcher and eight
+  field sub-components under `components/onboarding/fields/`.
+- `app/onboarding/page.js` — checklist drawer now renders via
+  `OnboardingDocSection` instead of the generic `DocumentUploadForm`.
+  `blockingStatus` updated so Labour Card (warning) does not block,
+  Medical Fitness requires `medical_result='pass'`, Emirates ID
+  requires both `front_file_url` and `back_file_url`.
+
+**Migration pending (not executed by this PR):**
+`scripts/migrations/003_onboarding_checklist_metadata.sql` — adds 13 new
+columns to `public.documents`, a `medical_result` CHECK, `medical_failed`
+boolean on `public.workers`, and four partial indexes. Idempotent.
+Must be applied via Supabase SQL editor before the code is deployed.
+
+**Retired:**
+`scripts/migrations/002_offers_onboarding.sql` — deleted. That schema
+was applied directly via Supabase MCP before PR #2 merged; keeping the
+file in the repo was a trap.
+
+**Explicit scope notes:**
+- No change to Contract Worker or Supplier tracks.
+- No change to `components/DocumentUploadForm.js` — still used by the
+  worker-profile Documents tab, Documents queue, and certification
+  uploads.
+- No backfill of existing 240 document rows (230 currently missing
+  metadata). Historical rows show as metadata-incomplete on the Documents
+  tab until the next renewal naturally captures it. Separate future PR.
+- `workers` identity/policy columns kept in place as a denormalised
+  read cache, written by `saveOnboardingDoc`. Deprecation is a separate
+  future PR.
 
 ---
 
