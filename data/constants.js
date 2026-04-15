@@ -1,4 +1,9 @@
-export const NATIONALITIES = ['British', 'Emirati', 'Filipino', 'Pakistani', 'Indian', 'Nepali', 'Ugandan', 'Nigerian', 'Ethiopian', 'Ghanaian', 'Zambian']
+export const NATIONALITIES = [
+  'Emirati', 'British', 'Indian', 'Nepali', 'Pakistani', 'Filipino',
+  'Ghanaian', 'Zambian', 'Ethiopian', 'Nigerian', 'Ugandan',
+  'Bangladeshi', 'Syrian', 'Sri Lankan', 'Afghan', 'Omani',
+  'Other'
+]
 
 export const POSITIONS = [
   // Welding

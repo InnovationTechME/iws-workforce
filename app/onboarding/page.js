@@ -1,5 +1,6 @@
 'use client'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef, Suspense } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
@@ -12,8 +13,9 @@ import { checkBlacklist } from '../../lib/blacklistService'
 import { getDocumentTemplate, initialiseWorkerDocuments } from '../../lib/documentRegister'
 import DocumentUploadForm from '../../components/DocumentUploadForm'
 import OnboardingDocSection from '../../components/onboarding/OnboardingDocSection'
+import EIDMaskedInput, { isValidEID } from '../../components/onboarding/fields/EIDMaskedInput'
 import { NATIONALITIES, POSITIONS } from '../../data/constants'
-import { formatDate } from '../../lib/utils'
+import { formatDate, passportExpiryGap } from '../../lib/utils'
 
 const TRACKS = {
   direct_staff: {
@@ -44,13 +46,6 @@ function sevenMonthsFromNow() {
   return d
 }
 
-function passportExpiryValid(dateStr, months = 7) {
-  if (!dateStr) return false
-  const d = new Date()
-  d.setMonth(d.getMonth() + months)
-  return new Date(dateStr) >= d
-}
-
 function emptyForm(track) {
   return {
     first_name: '', last_name: '', nationality: '',
@@ -68,10 +63,18 @@ function emptyForm(track) {
   }
 }
 
-export default function OnboardingPage() {
+export default function OnboardingPageWrapper() {
+  return <Suspense fallback={null}><OnboardingPage /></Suspense>
+}
+
+function OnboardingPage() {
   const [records, setRecords] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState(null)
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const trackSelectorRef = useRef(null)
+  const [addMode, setAddMode] = useState(false)
 
   const [selectedTrack, setSelectedTrack] = useState(null)
   const [showDrawer, setShowDrawer] = useState(false)
@@ -103,6 +106,20 @@ export default function OnboardingPage() {
 
   useEffect(() => { refresh() }, [])
   useEffect(() => { getSuppliers().then(setSuppliers).catch(() => setSuppliers([])) }, [])
+
+  // ?add=1 — triggered by the /workers Add Worker button; highlights the track
+  // selector so the user picks a track first. §5.3.5: no worker can exist
+  // without an onboarding row, and direct-staff workers go through Offers.
+  useEffect(() => {
+    if (searchParams?.get('add') === '1') {
+      setAddMode(true)
+      setTimeout(() => {
+        trackSelectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 100)
+      router.replace('/onboarding')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
   useEffect(() => {
     if (form.supplier_id) {
       getSupplierRates(form.supplier_id).then(setSupplierRates).catch(() => setSupplierRates([]))
@@ -131,6 +148,13 @@ export default function OnboardingPage() {
 
   const openDrawer = () => {
     if (!selectedTrack) return
+    // §5.3.5 — direct-staff workers must enter via an offer letter, not via a
+    // direct onboarding form. Redirect to Offers with the create drawer open.
+    if (selectedTrack === 'direct_staff') {
+      router.push('/offers?new=1')
+      return
+    }
+    setAddMode(false)
     setForm(emptyForm(selectedTrack))
     setFormErrors([])
     setFormError(null)
@@ -152,10 +176,15 @@ export default function OnboardingPage() {
     if (!form.nationality) errs.push('Nationality is required')
     if (!form.passport_number?.trim()) errs.push('Passport number is required')
     if (!form.passport_expiry) errs.push('Passport expiry is required')
-    else {
-      const minMonths = selectedTrack === 'direct_staff' ? 7 : 1
-      if (!passportExpiryValid(form.passport_expiry, minMonths)) {
-        errs.push(`Passport must be valid for at least ${minMonths} more month${minMonths > 1 ? 's' : ''}`)
+    else if (selectedTrack !== 'direct_staff') {
+      // §5.3.6 — passport must be valid ≥7 months from the worker's joining date
+      if (!form.joining_date) {
+        errs.push('Joining date is required to validate passport expiry')
+      } else {
+        const gap = passportExpiryGap(form.passport_expiry, form.joining_date, 7)
+        if (!gap.ok && gap.reason === 'too_soon') {
+          errs.push(`Passport expires before the 7-month minimum from joining date (${formatDate(form.joining_date)}). Only ${gap.monthsFromJoining} months of validity at joining.`)
+        }
       }
     }
     if (!form.trade_role) errs.push('Position / trade is required')
@@ -182,6 +211,7 @@ export default function OnboardingPage() {
 
     const today = new Date().toISOString().split('T')[0]
     if (!form.emirates_id?.trim()) errs.push('Emirates ID / National ID number is required')
+    else if (!isValidEID(form.emirates_id)) errs.push('Emirates ID must match format 784-XXXX-XXXXXXX-X (15 digits, starting with 784)')
     if (!form.emirates_id_expiry) errs.push('Emirates ID / National ID expiry is required')
     else if (form.emirates_id_expiry <= today) errs.push('Emirates ID / National ID expiry must be a future date')
     if (!form.visa_number?.trim()) errs.push('UAE Visa number is required')
@@ -288,8 +318,19 @@ export default function OnboardingPage() {
       }
       if (!created) throw new Error('Failed to create worker — check unique constraints')
 
-      await initialiseWorkerDocuments(created, supabase)
-      await upsertOnboarding(created.id, { created_at: new Date().toISOString() })
+      // §5.3.5 — workers + onboarding must be atomic. If either side fails after
+      // the workers row is created, roll back the workers row so we never leave
+      // an orphan that violates the invariant.
+      try {
+        await initialiseWorkerDocuments(created, supabase)
+        await upsertOnboarding(created.id, { created_at: new Date().toISOString() })
+      } catch (err) {
+        console.error('[onboarding] workers row created but onboarding insert failed; rolling back', { workerId: created.id, error: err })
+        try { await supabase.from('workers').delete().eq('id', created.id) } catch (delErr) {
+          console.error('[onboarding] rollback delete also failed — manual cleanup required', { workerId: created.id, delErr })
+        }
+        throw err
+      }
 
       const docUpdates = []
       if (form.emirates_id_expiry) {
@@ -428,8 +469,13 @@ export default function OnboardingPage() {
 
       {toast && <div style={{background:'#d1fae5',border:'1px solid #10b981',borderRadius:6,padding:'10px 14px',color:'#065f46',fontSize:13,marginBottom:12}}>✓ {toast}</div>}
       {loadErr && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:6,padding:'10px 14px',color:'#dc2626',fontSize:13,marginBottom:12}}>⚠ {loadErr}</div>}
+      {addMode && !selectedTrack && (
+        <div style={{background:'#ecfeff',border:'2px solid #0891b2',borderRadius:8,padding:'12px 16px',color:'#155e75',fontSize:13,marginBottom:12,fontWeight:500}}>
+          Pick a track below to start onboarding. Direct Staff go through an offer letter; Contract Workers and Supplier Company Workers are created here.
+        </div>
+      )}
 
-      <div style={{display:'flex',gap:14,marginBottom:16}}>
+      <div ref={trackSelectorRef} style={{display:'flex',gap:14,marginBottom:16,padding:addMode && !selectedTrack ? 6 : 0,borderRadius:12,background:addMode && !selectedTrack ? 'rgba(8,145,178,0.08)' : 'transparent',transition:'background .2s'}}>
         {Object.keys(TRACKS).map(renderTrackCard)}
       </div>
 
@@ -534,8 +580,13 @@ function OnboardingRow({ worker, onOpen }) {
 
 function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassportBlur, suppliers }) {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const minMonths = track === 'direct_staff' ? 7 : 1
-  const expiryWarn = form.passport_expiry && !passportExpiryValid(form.passport_expiry, minMonths)
+  // §5.3.6 — passport expiry must be ≥7 months from joining date (contract &
+  // supplier tracks; direct_staff is validated on the Offers form and
+  // redirected there before reaching this drawer).
+  const passportGap = (form.passport_expiry && form.joining_date)
+    ? passportExpiryGap(form.passport_expiry, form.joining_date, 7)
+    : null
+  const expiryWarn = passportGap && !passportGap.ok && passportGap.reason === 'too_soon'
   return (
     <div style={{display:'flex',flexDirection:'column',gap:14}}>
       {track === 'direct_staff' && (
@@ -579,7 +630,8 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
         </div>
         <div className="form-field"><label className="form-label">Passport expiry *</label>
           <input className="form-input" type="date" value={form.passport_expiry} onChange={e => set('passport_expiry', e.target.value)} style={expiryWarn?{borderColor:'var(--danger)'}:{}} />
-          {expiryWarn && <div style={{fontSize:11,color:'var(--danger)',marginTop:4}}>⚠ Passport must be valid for at least {minMonths} more month{minMonths > 1 ? 's' : ''}</div>}
+          {expiryWarn && <div style={{fontSize:11,color:'var(--danger)',marginTop:4}}>⚠ Passport expires before the 7-month minimum from joining date. Only {passportGap.monthsFromJoining} months of validity at joining.</div>}
+          {form.passport_expiry && !form.joining_date && track !== 'direct_staff' && <div style={{fontSize:11,color:'#b45309',marginTop:4}}>Enter joining date to validate passport expiry</div>}
         </div>
         <div className="form-field"><label className="form-label">Position / Trade *</label>
           <select className="form-select" value={form.trade_role} onChange={e => set('trade_role', e.target.value)}>
@@ -666,10 +718,7 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
 
       <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginTop:4}}>Document Details</div>
       <div className="form-grid">
-        <div className="form-field">
-          <label className="form-label">Emirates ID / National ID Number *</label>
-          <input className="form-input" type="text" value={form.emirates_id} onChange={e => set('emirates_id', e.target.value)} placeholder="784-XXXX-XXXXXXX-X" />
-        </div>
+        <EIDMaskedInput value={form.emirates_id} onChange={v => set('emirates_id', v)} required label="Emirates ID / National ID Number" />
         <div className="form-field">
           <label className="form-label">Emirates ID / National ID Expiry *</label>
           <input className="form-input" type="date" value={form.emirates_id_expiry} min={new Date(Date.now()+86400000).toISOString().split('T')[0]} onChange={e => set('emirates_id_expiry', e.target.value)} />
