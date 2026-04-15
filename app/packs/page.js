@@ -26,16 +26,18 @@ function resolveEntryTrack(w) {
 }
 
 // A template entry is "satisfied" for a worker when there's a matching
-// `documents` row carrying evidence. EID uses front+back files; everything
-// else uses file_url. Status in valid/expiring_soon is accepted.
+// `documents` row carrying file evidence. Match strictly on template.doc_type
+// ↔ documents.doc_type; template.kind is a UI-dispatch hint only and must
+// not be used for matching. Evidence = any of file_url / front_file_url /
+// back_file_url (EID rows saved via the Round C per-doc form carry
+// front+back; legacy combined-PDF EIDs carry just file_url — either
+// satisfies the pack). Expired rows are not satisfied. WC requires the
+// name-highlight confirmation per §5.3 when flagged on the template.
 function isSatisfied(templateEntry, docs) {
   const d = docs.find(x => x.doc_type === templateEntry.doc_type)
   if (!d) return false
-  if (templateEntry.doc_type === 'emirates_id' || templateEntry.kind === 'emirates_id') {
-    if (!d.front_file_url || !d.back_file_url) return false
-  } else if (!d.file_url) {
-    return false
-  }
+  const hasFile = !!(d.file_url || d.front_file_url || d.back_file_url)
+  if (!hasFile) return false
   if (d.status === 'expired') return false
   if (templateEntry.requires_highlight && d.highlighted_name_confirmed !== true) return false
   return true
