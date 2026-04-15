@@ -14,6 +14,7 @@ import { getDocumentTemplate, initialiseWorkerDocuments } from '../../lib/docume
 import DocumentUploadForm from '../../components/DocumentUploadForm'
 import OnboardingDocSection from '../../components/onboarding/OnboardingDocSection'
 import EIDMaskedInput, { isValidEID } from '../../components/onboarding/fields/EIDMaskedInput'
+import HourlyRateField, { isValidHourlyRate, HOURLY_RATES } from '../../components/fields/HourlyRateField'
 import { NATIONALITIES, POSITIONS } from '../../data/constants'
 import { formatDate, passportExpiryGap } from '../../lib/utils'
 
@@ -30,7 +31,7 @@ const TRACKS = {
     label: 'Contract Workers',
     color: '#2563eb',
     bgSelected: '#eff6ff',
-    description: "Hourly workers engaged directly by Innovation Tech on their own visa. Simplified onboarding — passport, visa, ID, WC and health insurance required. C3 card setup."
+    description: "Hourly workers engaged directly by Innovation Tech on their own visa. Simplified onboarding — Passport Copy, ID Copy (Emirates ID), Workmen's Compensation and Passport Visa Copy required. C3 card setup."
   },
   subcontractor_company_worker: {
     key: 'subcontractor_company_worker',
@@ -192,10 +193,11 @@ function OnboardingPage() {
       if (!form.monthly_salary) errs.push('Monthly salary is required')
     }
     if (selectedTrack === 'contract_worker') {
-      const rate = parseFloat(form.hourly_rate)
+      // §5.3.6 / §5.3.7 — fixed dropdown of integer rates 9..22.
       if (!form.hourly_rate) errs.push('Hourly rate is required')
-      else if (rate < 9) errs.push('Hourly rate cannot be below AED 9/hr')
-      else if (rate > 23) errs.push('Hourly rate cannot exceed AED 23/hr — check with management if higher rate needed')
+      else if (!isValidHourlyRate(form.hourly_rate)) {
+        errs.push(`Hourly rate must be one of ${HOURLY_RATES[0]}–${HOURLY_RATES[HOURLY_RATES.length - 1]} AED/hr`)
+      }
     }
     if (selectedTrack === 'contract_worker' && form.joining_date) {
       const maxDate = new Date()
@@ -231,7 +233,6 @@ function OnboardingPage() {
     setSaving(true); setFormError(null)
     try {
       const workerNumber = await getNextWorkerNumber()
-      console.log('Using worker number:', workerNumber)
       const full_name = `${form.first_name.trim()} ${form.last_name.trim()}`.trim()
       const base = {
         worker_number: workerNumber,
@@ -265,6 +266,7 @@ function OnboardingPage() {
           payment_method: 'WPS'
         }
       } else if (selectedTrack === 'contract_worker') {
+        // §5.3.7 — Contract Workers have no IT-provided health insurance.
         payload = {
           ...base,
           category: 'Contract Worker',
@@ -272,8 +274,6 @@ function OnboardingPage() {
           food_allowance: 0,
           other_allowance: 0,
           payment_method: 'Non-WPS',
-          health_insurance_provider: form.health_insurance_provider?.trim() || null,
-          health_insurance_expiry: form.health_insurance_expiry || null,
         }
       } else {
         payload = {
@@ -287,16 +287,6 @@ function OnboardingPage() {
           health_insurance_expiry: form.health_insurance_expiry || null,
         }
       }
-
-      console.log('=== CONTRACT WORKER INSERT PAYLOAD ===')
-      console.log('worker_number:', workerNumber)
-      console.log('first_name:', form.first_name)
-      console.log('last_name:', form.last_name)
-      console.log('nationality:', form.nationality)
-      console.log('trade_role:', form.trade_role || form.position)
-      console.log('category:', 'Contract Worker')
-      console.log('status:', 'onboarding')
-      console.log('full payload:', JSON.stringify(payload, null, 2))
 
       let created
       try {
@@ -596,7 +586,7 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
       )}
       {track === 'contract_worker' && (
         <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:6,padding:'10px 12px',fontSize:12,color:'#1e3a8a'}}>
-          Contract workers are on Innovation Technologies payroll but paid Non-WPS through a C3 card. A C3 card setup task will be created automatically. No offer letter is issued. You must collect and upload passport copy, passport photo, UAE visa, Emirates ID and Workmen&rsquo;s Compensation before the worker can be activated. Innovation Technologies provides workmen&rsquo;s compensation. Health insurance is the worker&rsquo;s own responsibility — upload their certificate for compliance.
+          Contract workers are on Innovation Technologies payroll but paid Non-WPS through a C3 card. A C3 card setup task will be created automatically. No offer letter is issued. You must collect and upload Passport Copy, ID Copy (Emirates ID), Workmen&rsquo;s Compensation and Passport Visa Copy before the worker can be activated. Innovation Technologies provides workmen&rsquo;s compensation.
         </div>
       )}
       {track === 'subcontractor_company_worker' && (
@@ -672,9 +662,7 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
         </>}
 
         {track === 'contract_worker' && <>
-          <div className="form-field"><label className="form-label">Hourly rate (AED) *</label>
-            <input className="form-input" type="number" value={form.hourly_rate} onChange={e => set('hourly_rate', e.target.value)} />
-          </div>
+          <HourlyRateField value={form.hourly_rate} onChange={v => set('hourly_rate', v)} required />
           <div className="form-field"><label className="form-label">Expected joining date</label>
             <input
               className="form-input"
@@ -731,7 +719,7 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
           <label className="form-label">UAE Visa Expiry *</label>
           <input className="form-input" type="date" value={form.visa_expiry} min={new Date(Date.now()+86400000).toISOString().split('T')[0]} onChange={e => set('visa_expiry', e.target.value)} />
         </div>
-        {(track === 'contract_worker' || track === 'subcontractor_company_worker') && <>
+        {track === 'subcontractor_company_worker' && <>
           <div className="form-field">
             <label className="form-label">Health Insurance Provider</label>
             <input className="form-input" type="text" value={form.health_insurance_provider} onChange={e => set('health_insurance_provider', e.target.value)} placeholder="e.g. AXA, Daman, Oman Insurance" />

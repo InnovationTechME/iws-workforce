@@ -7,6 +7,7 @@ import StatusBadge from '../../components/StatusBadge'
 import { getPackCoverage, getDocuments, getVisibleWorkers, getCertifications, getWorker, getDocumentsByWorker } from '../../lib/mockStore'
 import { formatDate, getStatusTone } from '../../lib/utils'
 import { PACK_DOCUMENT_TYPES } from '../../data/constants'
+import { listPastExperience } from '../../lib/workExperienceService'
 
 const DOC_LABELS = {
   passport: 'Passport Copy',
@@ -80,6 +81,7 @@ export default function PacksPage() {
   const [selectedDocIds, setSelectedDocIds] = useState([])
   const [building, setBuilding] = useState(false)
   const [showCoverPreview, setShowCoverPreview] = useState(false)
+  const [pastExperiences, setPastExperiences] = useState([])
 
   useEffect(() => { setCoverage(getPackCoverage()) }, [])
 
@@ -91,6 +93,9 @@ export default function PacksPage() {
     setWorkerDocs(allDocs)
     setWorkerCerts(certs)
     setSelectedDocIds([])
+    // §5.3.8 — past experiences only; system current-position row is
+    // hardcoded in the cover template from worker.trade_role + joining_date.
+    listPastExperience(workerId).then(setPastExperiences).catch(() => setPastExperiences([]))
   }
 
   const toggleDoc = (id) => {
@@ -108,8 +113,11 @@ export default function PacksPage() {
       const folderName = `${selectedWorker.worker_number}_${safeName}_DocumentPack_${datePart}`
       const folder = zip.folder(folderName)
 
-      // Cover page always first
-      const coverHtml = workerCoverPageHTML(selectedWorker, selectedWorker.experiences || [])
+      // Cover page always first. §5.3.8 — use listPastExperience so the
+      // system-created is_current row doesn't leak; the template hardcodes
+      // the current-position row from worker.trade_role + worker.joining_date.
+      const pastExperiences = await listPastExperience(selectedWorker.id).catch(() => [])
+      const coverHtml = workerCoverPageHTML(selectedWorker, pastExperiences)
       folder.file(`00_${selectedWorker.worker_number}_CoverPage.html`, coverHtml)
 
       // Auto-include the 5 standard documents (status != 'missing')
@@ -394,8 +402,8 @@ export default function PacksPage() {
               {/* Experience */}
               <div style={{background:'#f8fafc',padding:'16px 24px'}}>
                 <div style={{fontSize:11,fontWeight:700,color:'#1e3a8a',textTransform:'uppercase',letterSpacing:1,marginBottom:10}}>Work Experience</div>
-                {(w.experiences||[]).map((exp,i) => (
-                  <div key={i} style={{fontSize:12,color:'#475569',marginBottom:4}}>{exp.company} — {exp.role} — {exp.dates||''}</div>
+                {pastExperiences.map((exp,i) => (
+                  <div key={exp.id||i} style={{fontSize:12,color:'#475569',marginBottom:4}}>{exp.company_name} — {exp.position||'—'} — {exp.from_date ? formatDate(exp.from_date) : '—'}{exp.to_date ? ` to ${formatDate(exp.to_date)}` : ''}</div>
                 ))}
                 <div style={{fontSize:12,fontWeight:600,color:'#1e3a8a'}}>Innovation Technologies LLC — {w.trade_role} — {w.joining_date ? formatDate(w.joining_date) : '—'} to Present</div>
               </div>
