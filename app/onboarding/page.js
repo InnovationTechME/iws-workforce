@@ -31,7 +31,7 @@ const TRACKS = {
     label: 'Contract Workers',
     color: '#2563eb',
     bgSelected: '#eff6ff',
-    description: "Hourly workers engaged directly by Innovation Tech on their own visa. Simplified onboarding — passport, visa, ID, WC and health insurance required. C3 card setup."
+    description: "Hourly workers engaged directly by Innovation Tech on their own visa. Simplified onboarding — Passport Copy, ID Copy (Emirates ID), Workmen's Compensation and Passport Visa Copy required. C3 card setup."
   },
   subcontractor_company_worker: {
     key: 'subcontractor_company_worker',
