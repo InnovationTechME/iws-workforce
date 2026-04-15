@@ -1,44 +1,88 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
-import { getPackCoverage, getDocuments, getVisibleWorkers, getCertifications, getWorker, getDocumentsByWorker } from '../../lib/mockStore'
+import { supabase } from '../../lib/supabaseClient'
+import { getVisibleWorkers } from '../../lib/workerService'
+import { getDocumentsByWorker } from '../../lib/documentService'
+import { getCertificationsByWorker } from '../../lib/certificationService'
+import { getDocumentTemplate } from '../../lib/documentRegister'
 import { formatDate, getStatusTone } from '../../lib/utils'
-import { PACK_DOCUMENT_TYPES } from '../../data/constants'
 import { listPastExperience } from '../../lib/workExperienceService'
+import { LOGO_BASE64 } from '../../lib/logoBase64'
 
-const DOC_LABELS = {
-  passport: 'Passport Copy',
-  passport_copy: 'Passport Copy',
-  photo: 'Passport Photo',
-  passport_photo: 'Passport Photo',
-  uae_visa: 'UAE Visa',
-  visa: 'UAE Visa',
-  emirates_id: 'Emirates ID',
-  workers_compensation: "Workmen's Compensation",
-  workmen_compensation: "Workmen's Compensation",
-  health_insurance: 'Health Insurance',
-  medical_insurance: 'Health Insurance',
-  medical_fitness: 'Medical Certificate',
-  labour_card: 'Labour Card',
-  offer_letter: 'Offer Letter',
-  employment_contract: 'Contract',
-  iloe_certificate: 'ILOE Certificate',
-  worker_policy_manual: 'Policy Manual',
-  health_card: 'Health Card',
+// Normalise `worker.entry_track` for records that pre-date the §5.3.5
+// invariant (some legacy rows only have `category`). Keeps
+// getDocumentTemplate's three-branch logic working cleanly.
+function resolveEntryTrack(w) {
+  if (w?.entry_track) return w
+  let entry_track = 'contract_worker'
+  if (w?.category === 'Permanent Staff' || w?.category === 'Office Staff') entry_track = 'direct_staff'
+  else if (w?.category === 'Subcontract Worker') entry_track = 'subcontractor_company_worker'
+  else if (w?.category === 'Contract Worker') entry_track = 'contract_worker'
+  return { ...w, entry_track }
 }
-const labelFor = (t) => DOC_LABELS[t] || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 
-// Standard documents always auto-included in a pack (cover page is generated, not stored)
-const STANDARD_PACK_DOCS = [
-  { key:'passport', label:'Passport Copy' },
-  { key:'photo', label:'Passport Photo' },
-  { key:'uae_visa', label:'UAE Visa' },
-  { key:'emirates_id', label:'Emirates ID' },
-  { key:'workers_compensation', label:"Workmen's Compensation \u2014 Name Highlighted" },
-]
+// A template entry is "satisfied" for a worker when there's a matching
+// `documents` row carrying evidence. EID uses front+back files; everything
+// else uses file_url. Status in valid/expiring_soon is accepted.
+function isSatisfied(templateEntry, docs) {
+  const d = docs.find(x => x.doc_type === templateEntry.doc_type)
+  if (!d) return false
+  if (templateEntry.doc_type === 'emirates_id' || templateEntry.kind === 'emirates_id') {
+    if (!d.front_file_url || !d.back_file_url) return false
+  } else if (!d.file_url) {
+    return false
+  }
+  if (d.status === 'expired') return false
+  if (templateEntry.requires_highlight && d.highlighted_name_confirmed !== true) return false
+  return true
+}
+
+// Per-track pack docs = template entries flagged `in_pack: true`.
+// Used by the top-level coverage table AND the pack drawer.
+function computeCoverage(worker, docs) {
+  const tpl = getDocumentTemplate(resolveEntryTrack(worker))
+  const inPack = tpl.filter(t => t.in_pack)
+  const missingEntries = inPack.filter(t => !isSatisfied(t, docs))
+  return {
+    template: tpl,
+    in_pack_items: inPack,
+    available_count: inPack.length - missingEntries.length,
+    required_count: inPack.length,
+    missing_entries: missingEntries,
+    missing_types: missingEntries.map(t => t.doc_type),
+  }
+}
+
+function assessPackReadiness(worker, docs) {
+  const cov = computeCoverage(worker, docs)
+  const issues = cov.missing_entries.map(t => ({
+    type: 'missing',
+    label: t.label,
+    key: t.doc_type,
+    fix: `Upload ${t.label} in the worker's Documents tab`,
+  }))
+  // WC-specific exposure — only if the template includes WC in the pack.
+  const wcTemplate = cov.in_pack_items.find(t => t.doc_type === 'workmen_compensation')
+  if (wcTemplate) {
+    const wc = docs.find(x => x.doc_type === 'workmen_compensation')
+    const today = new Date(); today.setHours(0,0,0,0)
+    if (wc?.file_url) {
+      if (!wc.expiry_date) {
+        issues.push({ type: 'wc_expiry_missing', label: 'WC expiry date', key: 'workmen_compensation', fix: 'Set WC expiry date in the Documents tab' })
+      } else if (new Date(wc.expiry_date) < today) {
+        issues.push({ type: 'wc_expired', label: `WC expired on ${wc.expiry_date}`, key: 'workmen_compensation', fix: 'Upload renewed WC certificate' })
+      }
+      if (wc.highlighted_name_confirmed !== true) {
+        issues.push({ type: 'wc_highlight', label: 'WC name-highlight not confirmed', key: 'workmen_compensation', fix: "Re-upload WC with the worker's name highlighted and tick the confirmation checkbox" })
+      }
+    }
+  }
+  return { ready: issues.length === 0, issues, coverage: cov }
+}
 
 function ddmmyyyy(d) {
   const dt = d instanceof Date ? d : new Date()
@@ -48,32 +92,11 @@ function ddmmyyyy(d) {
   return `${dd}${mm}${yy}`
 }
 
-function assessPackReadiness(worker, docs) {
-  const issues = []
-  const today = new Date()
-  today.setHours(0,0,0,0)
-  for (const std of STANDARD_PACK_DOCS) {
-    const d = docs.find(x => x.document_type === std.key)
-    if (!d || d.status === 'missing' || !d.file_name) {
-      issues.push({ type: 'missing', label: std.label, key: std.key, fix: `Upload ${std.label} in the worker's Documents tab` })
-    }
-  }
-  const wc = docs.find(x => x.document_type === 'workers_compensation')
-  if (wc) {
-    if (!wc.expiry_date) {
-      issues.push({ type: 'wc_expiry_missing', label: 'WC expiry date', key: 'workers_compensation', fix: 'Set WC expiry date in the Documents tab' })
-    } else if (new Date(wc.expiry_date) < today) {
-      issues.push({ type: 'wc_expired', label: `WC expired on ${wc.expiry_date}`, key: 'workers_compensation', fix: 'Upload renewed WC certificate' })
-    }
-    if (wc.highlighted_name_confirmed !== true) {
-      issues.push({ type: 'wc_highlight', label: 'WC name-highlight not confirmed', key: 'workers_compensation', fix: 'Re-upload WC with the worker\u2019s name highlighted and tick the confirmation checkbox' })
-    }
-  }
-  return { ready: issues.length === 0, issues }
-}
-
 export default function PacksPage() {
-  const [coverage, setCoverage] = useState([])
+  const [workers, setWorkers] = useState([])
+  const [allDocs, setAllDocs] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [loadErr, setLoadErr] = useState(null)
   const [filter, setFilter] = useState('all')
   const [selectedWorker, setSelectedWorker] = useState(null)
   const [workerDocs, setWorkerDocs] = useState([])
@@ -83,19 +106,64 @@ export default function PacksPage() {
   const [showCoverPreview, setShowCoverPreview] = useState(false)
   const [pastExperiences, setPastExperiences] = useState([])
 
-  useEffect(() => { setCoverage(getPackCoverage()) }, [])
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const ws = await getVisibleWorkers()
+        const { data: docs, error } = await supabase.from('documents').select('*')
+        if (error) throw error
+        if (!alive) return
+        setWorkers(ws)
+        setAllDocs(docs || [])
+        setLoadErr(null)
+      } catch (e) {
+        if (alive) setLoadErr(e.message || String(e))
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => { alive = false }
+  }, [])
 
-  const openPackBuilder = (workerId) => {
-    const worker = getWorker(workerId)
-    const allDocs = getDocumentsByWorker(workerId)
-    const certs = getCertifications().filter(c => c.worker_id === workerId)
-    setSelectedWorker(worker)
-    setWorkerDocs(allDocs)
-    setWorkerCerts(certs)
+  const coverage = useMemo(() => {
+    return workers.map(w => {
+      const docs = allDocs.filter(d => d.worker_id === w.id)
+      const cov = computeCoverage(w, docs)
+      return {
+        worker_id: w.id,
+        worker_number: w.worker_number,
+        worker_name: w.full_name,
+        category: w.category,
+        status: w.status,
+        available_count: cov.available_count,
+        required_count: cov.required_count,
+        missing_types: cov.missing_types,
+        missing_labels: cov.missing_entries.map(t => t.label),
+      }
+    })
+  }, [workers, allDocs])
+
+  const openPackBuilder = async (workerId) => {
+    const worker = workers.find(w => w.id === workerId)
+    if (!worker) return
+    setSelectedWorker(resolveEntryTrack(worker))
     setSelectedDocIds([])
-    // §5.3.8 — past experiences only; system current-position row is
-    // hardcoded in the cover template from worker.trade_role + joining_date.
-    listPastExperience(workerId).then(setPastExperiences).catch(() => setPastExperiences([]))
+    try {
+      const [docs, certs, past] = await Promise.all([
+        getDocumentsByWorker(workerId),
+        getCertificationsByWorker(workerId),
+        listPastExperience(workerId).catch(() => []),
+      ])
+      setWorkerDocs(docs)
+      setWorkerCerts(certs)
+      setPastExperiences(past)
+    } catch (e) {
+      console.error('openPackBuilder error:', e)
+      setWorkerDocs([])
+      setWorkerCerts([])
+      setPastExperiences([])
+    }
   }
 
   const toggleDoc = (id) => {
@@ -113,29 +181,28 @@ export default function PacksPage() {
       const folderName = `${selectedWorker.worker_number}_${safeName}_DocumentPack_${datePart}`
       const folder = zip.folder(folderName)
 
-      // Cover page always first. §5.3.8 — use listPastExperience so the
-      // system-created is_current row doesn't leak; the template hardcodes
-      // the current-position row from worker.trade_role + worker.joining_date.
-      const pastExperiences = await listPastExperience(selectedWorker.id).catch(() => [])
+      // Cover page always first. §5.3.8 — listPastExperience skips the
+      // system is_current row so the cover template's hardcoded
+      // "Innovation Technologies" row isn't duplicated.
       const coverHtml = workerCoverPageHTML(selectedWorker, pastExperiences)
       folder.file(`00_${selectedWorker.worker_number}_CoverPage.html`, coverHtml)
 
-      // Auto-include the 5 standard documents (status != 'missing')
+      // Auto-include every `in_pack` doc per the worker's template.
+      const inPackTemplate = getDocumentTemplate(selectedWorker).filter(t => t.in_pack)
       const autoIncluded = []
-      STANDARD_PACK_DOCS.forEach((std, idx) => {
-        const d = workerDocs.find(x => x.document_type === std.key)
-        if (d && d.status !== 'missing') {
-          const fileName = d.file_name || `${selectedWorker.worker_number}_${safeName}_${std.key}.pdf`
-          const mockContent = `[MOCK FILE - DOCUMENT]\n\nWorker: ${selectedWorker.full_name}\nID: ${selectedWorker.worker_number}\nDocument: ${std.label}\nFile: ${fileName}\nGenerated: ${new Date().toISOString()}`
+      inPackTemplate.forEach((t, idx) => {
+        const d = workerDocs.find(x => x.doc_type === t.doc_type)
+        if (d && (d.file_url || d.front_file_url)) {
+          const fileName = `${selectedWorker.worker_number}_${safeName}_${t.doc_type}.pdf`
+          const mockContent = `[MOCK FILE - DOCUMENT]\n\nWorker: ${selectedWorker.full_name}\nID: ${selectedWorker.worker_number}\nDocument: ${t.label}\nFile: ${fileName}\nGenerated: ${new Date().toISOString()}`
           folder.file(`${String(idx+1).padStart(2,'0')}_${fileName}`, mockContent)
-          autoIncluded.push({ name: fileName, label: std.label })
+          autoIncluded.push({ name: fileName, label: t.label })
         }
       })
 
-      // Any additional certs the user ticked
       const optionalItems = workerCerts
         .filter(c => selectedDocIds.includes(c.id))
-        .map(c => ({ id:c.id, name: c.file_name || `${selectedWorker.worker_number}_${safeName}_${c.certification_type.replace(/\s+/g,'_')}.pdf`, item: c }))
+        .map(c => ({ id:c.id, name: `${selectedWorker.worker_number}_${safeName}_${c.certification_type.replace(/\s+/g,'_')}.pdf`, item: c }))
 
       optionalItems.forEach((item, i) => {
         const mockContent = `[MOCK FILE - CERTIFICATION]\n\nWorker: ${selectedWorker.full_name}\nID: ${selectedWorker.worker_number}\nCertification: ${item.item.certification_type}\nGenerated: ${new Date().toISOString()}`
@@ -159,11 +226,9 @@ export default function PacksPage() {
   }
 
   const sorted = [...coverage].sort((a,b) => {
-    const aWorker = getWorker(a.worker_id)
-    const bWorker = getWorker(b.worker_id)
-    const aActive = aWorker?.active !== false ? 0 : 1
-    const bActive = bWorker?.active !== false ? 0 : 1
-    return aActive - bActive
+    const aInactive = a.status === 'inactive' ? 1 : 0
+    const bInactive = b.status === 'inactive' ? 1 : 0
+    return aInactive - bInactive
   })
   const filtered = filter==='all' ? sorted : filter==='ready' ? sorted.filter(p=>p.available_count===p.required_count) : sorted.filter(p=>p.available_count<p.required_count)
   const ready = coverage.filter(p=>p.available_count===p.required_count).length
@@ -180,6 +245,8 @@ export default function PacksPage() {
         <div className="stat-card"><div className="num" style={{fontSize:20}}>{coverage.length}</div><div className="lbl">Workers assessed</div></div>
       </div>
 
+      {loadErr && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:6,padding:'10px 14px',color:'#dc2626',fontSize:13,marginBottom:12}}>⚠ {loadErr}</div>}
+
       <div style={{display:'grid',gridTemplateColumns: selectedWorker ? '1fr 380px' : '1fr',gap:16}}>
         <div className="panel">
           <div className="toolbar">
@@ -191,15 +258,22 @@ export default function PacksPage() {
           <div className="table-wrap"><table>
             <thead><tr><th>Worker</th><th>Category</th><th>Status</th><th>Coverage</th><th>Missing</th><th>Build Pack</th></tr></thead>
             <tbody>
-              {filtered.map(p=>{ const isInactive = getWorker(p.worker_id)?.active === false; return (
-                <tr key={p.worker_id} style={{background:selectedWorker?.id===p.worker_id?'#eff6ff':'',opacity:isInactive?0.6:1}}>
-                  <td style={{fontWeight:500}}>{p.worker_name}<div style={{fontSize:11,color:'var(--hint)'}}>{p.worker_number}</div></td>
-                  <td><StatusBadge label={p.category} tone="neutral" /></td>
-                  <td>{isInactive ? <StatusBadge label="Inactive" tone="neutral" /> : <StatusBadge label={p.available_count===p.required_count?'Ready':'Blocked'} tone={p.available_count===p.required_count?'success':'danger'} />}</td>
-                  <td><div style={{display:'flex',alignItems:'center',gap:8}}><div style={{flex:1,height:4,background:'var(--border)',borderRadius:2}}><div style={{width:`${Math.min((p.available_count/p.required_count)*100,100)}%`,height:'100%',background:p.available_count===p.required_count?'var(--success)':'var(--warning)',borderRadius:2}}/></div><span style={{fontSize:11,color:'var(--muted)',whiteSpace:'nowrap'}}>{p.available_count}/{p.required_count}</span></div></td>
-                  <td style={{fontSize:12,color:'var(--danger)'}}>{p.missing_types?.length ? p.missing_types.map(labelFor).join(', ') : '—'}</td>
-                  <td><button className="btn btn-teal btn-sm" onClick={()=>openPackBuilder(p.worker_id)}>📦 Select &amp; Build</button></td>
-                </tr>)
+              {loading ? (
+                <tr><td colSpan={6} style={{padding:20,textAlign:'center',color:'var(--hint)'}}>Loading…</td></tr>
+              ) : filtered.length === 0 ? (
+                <tr><td colSpan={6} style={{padding:20,textAlign:'center',color:'var(--hint)'}}>No workers.</td></tr>
+              ) : filtered.map(p => {
+                const isInactive = p.status === 'inactive'
+                return (
+                  <tr key={p.worker_id} style={{background:selectedWorker?.id===p.worker_id?'#eff6ff':'',opacity:isInactive?0.6:1}}>
+                    <td style={{fontWeight:500}}>{p.worker_name}<div style={{fontSize:11,color:'var(--hint)'}}>{p.worker_number}</div></td>
+                    <td><StatusBadge label={p.category} tone="neutral" /></td>
+                    <td>{isInactive ? <StatusBadge label="Inactive" tone="neutral" /> : <StatusBadge label={p.available_count===p.required_count?'Ready':'Blocked'} tone={p.available_count===p.required_count?'success':'danger'} />}</td>
+                    <td><div style={{display:'flex',alignItems:'center',gap:8}}><div style={{flex:1,height:4,background:'var(--border)',borderRadius:2}}><div style={{width:`${Math.min((p.available_count/Math.max(p.required_count,1))*100,100)}%`,height:'100%',background:p.available_count===p.required_count?'var(--success)':'var(--warning)',borderRadius:2}}/></div><span style={{fontSize:11,color:'var(--muted)',whiteSpace:'nowrap'}}>{p.available_count}/{p.required_count}</span></div></td>
+                    <td style={{fontSize:12,color:'var(--danger)'}}>{p.missing_labels?.length ? p.missing_labels.join(', ') : '—'}</td>
+                    <td><button className="btn btn-teal btn-sm" onClick={()=>openPackBuilder(p.worker_id)}>📦 Select &amp; Build</button></td>
+                  </tr>
+                )
               })}
             </tbody>
           </table></div>
@@ -214,7 +288,7 @@ export default function PacksPage() {
 
             {(() => {
               const readiness = assessPackReadiness(selectedWorker, workerDocs)
-              const wc = workerDocs.find(x => x.document_type === 'workers_compensation')
+              const inPackItems = readiness.coverage.in_pack_items
               return (
                 <>
                 <div style={{flex:1,overflowY:'auto',minHeight:0}}>
@@ -227,6 +301,7 @@ export default function PacksPage() {
                           • <strong>{iss.label}</strong> — {iss.fix}
                         </div>
                       ))}
+                      {/* §5.3.5 — worker profile route keyed by Supabase UUID. */}
                       <Link href={`/workers/${selectedWorker.id}`} className="btn btn-secondary btn-sm" style={{marginTop:8,fontSize:11}}>Open worker Documents →</Link>
                     </div>
                   )}
@@ -238,16 +313,16 @@ export default function PacksPage() {
                       <div style={{flex:1,fontSize:12,fontWeight:500}}>Cover Page</div>
                       <button className="btn btn-ghost btn-sm" style={{fontSize:10,padding:'2px 6px'}} onClick={(e) => {e.preventDefault(); setShowCoverPreview(true)}}>👁 Preview</button>
                     </div>
-                    {STANDARD_PACK_DOCS.map(std => {
-                      const d = workerDocs.find(x => x.document_type === std.key)
-                      const ok = d && d.status !== 'missing' && d.file_name
+                    {inPackItems.map(t => {
+                      const d = workerDocs.find(x => x.doc_type === t.doc_type)
+                      const ok = isSatisfied(t, workerDocs)
                       const expiry = d?.expiry_date
                       return (
-                        <div key={std.key} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0'}}>
+                        <div key={t.doc_type} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0'}}>
                           <span style={{color: ok ? '#0d9488' : '#94a3b8',fontSize:13}}>{ok ? '✓' : '○'}</span>
                           <div style={{flex:1,fontSize:12}}>
-                            <span style={{fontWeight: ok ? 500 : 400, color: ok ? 'var(--text)' : 'var(--hint)'}}>{std.label}</span>
-                            {std.key === 'workers_compensation' && expiry && <span style={{fontSize:10,color:'var(--muted)',marginLeft:6}}>(expires {formatDate(expiry)})</span>}
+                            <span style={{fontWeight: ok ? 500 : 400, color: ok ? 'var(--text)' : 'var(--hint)'}}>{t.label}</span>
+                            {t.doc_type === 'workmen_compensation' && expiry && <span style={{fontSize:10,color:'var(--muted)',marginLeft:6}}>(expires {formatDate(expiry)})</span>}
                           </div>
                         </div>
                       )
@@ -272,10 +347,7 @@ export default function PacksPage() {
                 </div>
 
                 <div style={{flexShrink:0,paddingTop:12,borderTop:'1px solid var(--border)'}}>
-                  <div style={{fontSize:12,color:'var(--muted)',marginBottom:10}}>{STANDARD_PACK_DOCS.filter(s => {
-                    const d = workerDocs.find(x => x.document_type === s.key)
-                    return d && d.status !== 'missing'
-                  }).length + 1} standard + {selectedDocIds.length} optional</div>
+                  <div style={{fontSize:12,color:'var(--muted)',marginBottom:10}}>{inPackItems.filter(t => isSatisfied(t, workerDocs)).length + 1} standard + {selectedDocIds.length} optional</div>
                   <button className="btn btn-primary" style={{width:'100%'}} disabled={!readiness.ready || building} onClick={handleBuildZip}>
                     {building ? 'Building ZIP...' : !readiness.ready ? '⛔ Pack blocked' : '⬇ Download Pack as ZIP'}
                   </button>
@@ -287,12 +359,12 @@ export default function PacksPage() {
         )}
       </div>
       {showCoverPreview && selectedWorker && (() => {
-        const w = getWorker(selectedWorker.id) || selectedWorker
-        const wDocs = getDocumentsByWorker(w.id)
-        const allCerts = getCertifications().filter(c => c.worker_id === w.id)
-        const passport = wDocs.find(d => d.document_type === 'passport')
-        const eid = wDocs.find(d => d.document_type === 'emirates_id')
-        const visa = wDocs.find(d => d.document_type === 'visa') || wDocs.find(d => d.document_type === 'labour_card')
+        const w = selectedWorker
+        const wDocs = workerDocs
+        const allCerts = workerCerts
+        const passport = wDocs.find(d => d.doc_type === 'passport_copy')
+        const eid = wDocs.find(d => d.doc_type === 'emirates_id')
+        const visa = wDocs.find(d => d.doc_type === 'uae_visa') || wDocs.find(d => d.doc_type === 'labour_card')
         const age = w.date_of_birth ? Math.floor((new Date() - new Date(w.date_of_birth)) / (365.25*24*60*60*1000)) : null
         const todayFormatted = new Date().toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'})
         const statusBadge = (s) => {
@@ -336,7 +408,12 @@ export default function PacksPage() {
             <div id="cover-page-print" style={{background:'#fff',borderRadius:4,overflow:'hidden',fontFamily:'Arial, sans-serif',boxShadow:'0 8px 32px rgba(0,0,0,0.3)'}}>
               {/* Header */}
               <div style={{background:'#0f172a',padding:'20px 24px',display:'flex',alignItems:'center'}}>
-                <div style={{width:44,height:44,borderRadius:'50%',background:'#1e3a8a',display:'flex',alignItems:'center',justifyContent:'center',color:'white',fontWeight:800,fontSize:17,flexShrink:0}}>iN</div>
+                {/* Bug 3 — embed the logo as a data URI (reused LOGO_BASE64
+                    helper from lib/logoBase64.js) so Print/Save-PDF works
+                    offline and the "iN" placeholder is replaced. */}
+                <div style={{width:44,height:44,borderRadius:'50%',background:'#fff',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,padding:4}}>
+                  <img src={LOGO_BASE64} alt="Innovation Technologies" style={{maxWidth:'100%',maxHeight:'100%',objectFit:'contain'}} />
+                </div>
                 <div style={{flex:1,textAlign:'center'}}>
                   <div style={{color:'white',fontSize:18,fontWeight:700}}>Innovation Technologies LLC</div>
                 </div>
