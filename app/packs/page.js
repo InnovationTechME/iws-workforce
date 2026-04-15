@@ -427,18 +427,17 @@ export default function PacksPage() {
               {/* Hero */}
               <div style={{background:'#fff',padding:'28px 24px',borderBottom:'1px solid #e2e8f0',display:'flex',gap:20}}>
                 <div style={{flex:'0 0 60%'}}>
-                  <div style={{fontSize:26,fontWeight:700,color:'#0f172a',lineHeight:1.2}}>{w.full_name}</div>
-                  {/* §4 cover redesign — trade is the headline, no category badge, no status pill. */}
-                  <div style={{fontSize:20,fontWeight:600,color:'#0891b2',lineHeight:1.15,marginTop:4}}>{w.trade_role || '—'}</div>
+                  {/* §5 cleanup: trade is the visual headline; name/ref
+                      are not repeated here — they live in the grid below. */}
+                  <div style={{fontSize:22,fontWeight:600,color:'#0891b2',lineHeight:1.15}}>{w.trade_role || '—'}</div>
                   <div style={{fontSize:12,color:'#64748b',marginTop:6}}>
-                    {w.nationality || '—'}{age != null ? ` · ${age} years` : ''}
+                    {w.nationality || '—'}{age != null ? ` · ${age} years` : ''} · <span style={{fontFamily:'monospace',color:'#1e3a8a'}}>{w.worker_number}</span>
                   </div>
-                  <div style={{fontSize:13,fontFamily:'monospace',color:'#1e3a8a',marginTop:10}}>{w.worker_number}</div>
                 </div>
                 <div style={{flex:'0 0 40%',display:'flex',justifyContent:'flex-end'}}>
-                  <div style={{width:80,height:100,background:'#f1f5f9',border:'2px solid #e2e8f0',borderRadius:6,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
-                    <div style={{fontSize:24}}>📷</div>
-                    <div style={{fontSize:11,color:'#94a3b8',marginTop:2}}>Photo</div>
+                  <div style={{width:80,height:100,background:'#f5f1eb',border:'1px solid #e7e0d4',borderRadius:6,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
+                    <div style={{fontSize:10,fontWeight:700,color:'#94a3b8',letterSpacing:1}}>PHOTO</div>
+                    <div style={{fontSize:10,fontWeight:700,color:'#94a3b8',letterSpacing:1,marginTop:2}}>PENDING</div>
                   </div>
                 </div>
               </div>
