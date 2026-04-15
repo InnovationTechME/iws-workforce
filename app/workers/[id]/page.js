@@ -11,6 +11,7 @@ import { getWorkerById } from '../../../lib/workerService'
 import { getDocumentsByWorker, upsertDocument } from '../../../lib/documentService'
 import { getDocumentTemplate, generateDocumentFilename } from '../../../lib/documentRegister'
 import DocumentUploadForm from '../../../components/DocumentUploadForm'
+import WorkExperienceSection from '../../../components/WorkExperienceSection'
 import { supabase } from '../../../lib/supabaseClient'
 import { getSignedUrl, uploadWorkerDocument } from '../../../lib/storageService'
 import { getAttendanceByWorker } from '../../../lib/attendanceService'
@@ -275,6 +276,11 @@ export default function WorkerDetailPage() {
                 {iloe.status === 'not_required' && <div style={{fontSize:12,color:'var(--hint)'}}>Subcontract workers — ILOE managed by their company.</div>}
               </div>
             )})()}
+
+            {/* §5.3.8 — Work Experience (system current-position row + past experiences) */}
+            <div style={{marginTop:16}}>
+              <WorkExperienceSection worker={worker} />
+            </div>
           </div>
         )}
 
