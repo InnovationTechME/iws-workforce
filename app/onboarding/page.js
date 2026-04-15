@@ -50,6 +50,7 @@ function sevenMonthsFromNow() {
 function emptyForm(track) {
   return {
     first_name: '', last_name: '', nationality: '',
+    date_of_birth: '',
     passport_number: '', passport_expiry: '',
     trade_role: '',
     category: track === 'direct_staff' ? 'Permanent Staff' : track === 'contract_worker' ? 'Contract Worker' : 'Subcontract Worker',
@@ -175,6 +176,21 @@ function OnboardingPage() {
     if (!form.first_name?.trim()) errs.push('First name is required')
     if (!form.last_name?.trim()) errs.push('Last name is required')
     if (!form.nationality) errs.push('Nationality is required')
+    if (!form.date_of_birth) errs.push('Date of birth is required')
+    else {
+      const dob = new Date(form.date_of_birth)
+      const now = new Date()
+      if (dob > now) errs.push('Date of birth cannot be in the future')
+      else {
+        const eighty = new Date(); eighty.setFullYear(eighty.getFullYear() - 80)
+        if (dob < eighty) errs.push('Date of birth cannot be more than 80 years ago')
+        if (form.joining_date) {
+          const join = new Date(form.joining_date)
+          const ageAtJoin = (join - dob) / (365.25 * 24 * 3600 * 1000)
+          if (ageAtJoin < 18) errs.push('Worker must be at least 18 years old at joining date')
+        }
+      }
+    }
     if (!form.passport_number?.trim()) errs.push('Passport number is required')
     if (!form.passport_expiry) errs.push('Passport expiry is required')
     else if (selectedTrack !== 'direct_staff') {
@@ -239,6 +255,7 @@ function OnboardingPage() {
         first_name: form.first_name.trim(),
         last_name: form.last_name.trim(),
         nationality: form.nationality,
+        date_of_birth: form.date_of_birth || null,
         passport_number: form.passport_number.trim(),
         passport_expiry: form.passport_expiry || null,
         trade_role: form.trade_role,
@@ -614,6 +631,15 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
             <option value="">Select nationality</option>
             {NATIONALITIES.map(n => <option key={n} value={n}>{n}</option>)}
           </select>
+        </div>
+        <div className="form-field"><label className="form-label">Date of birth *</label>
+          <input
+            className="form-input"
+            type="date"
+            value={form.date_of_birth}
+            onChange={e => set('date_of_birth', e.target.value)}
+            max={new Date().toISOString().split('T')[0]}
+          />
         </div>
         <div className="form-field"><label className="form-label">Passport number *</label>
           <input className="form-input" value={form.passport_number} onChange={e => set('passport_number', e.target.value)} onBlur={onPassportBlur} placeholder="Auto-checks blacklist on blur" />

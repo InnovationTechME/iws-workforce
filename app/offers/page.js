@@ -30,7 +30,7 @@ function OffersPage() {
   const emptyForm = () => {
     const d = new Date(); d.setDate(d.getDate() + 7)
     const validUntil = d.toISOString().split('T')[0]
-    return { first_name:'', last_name:'', passport_number:'', passport_expiry:'', nationality:'', email:'', trade_role:'', category:'Permanent Staff', employment_type:'Fixed-term (2 years, renewable)', pay_type:'monthly', basic_salary_or_rate:'', housing_allowance:0, transport_allowance:0, food_allowance:0, other_allowance:0, start_date:'', valid_until:validUntil, notes:'' }
+    return { first_name:'', last_name:'', passport_number:'', passport_expiry:'', nationality:'', date_of_birth:'', email:'', trade_role:'', category:'Permanent Staff', employment_type:'Fixed-term (2 years, renewable)', pay_type:'monthly', basic_salary_or_rate:'', housing_allowance:0, transport_allowance:0, food_allowance:0, other_allowance:0, start_date:'', valid_until:validUntil, notes:'' }
   }
   const [form, setForm] = useState(emptyForm())
 
@@ -118,6 +118,21 @@ function OffersPage() {
     }
     if (!form.passport_number?.trim()) errors.push('Passport number is required')
     if (!form.nationality) errors.push('Nationality is required')
+    if (!form.date_of_birth) errors.push('Date of birth is required')
+    else {
+      const dob = new Date(form.date_of_birth)
+      const now = new Date()
+      if (dob > now) errors.push('Date of birth cannot be in the future')
+      else {
+        const eighty = new Date(); eighty.setFullYear(eighty.getFullYear() - 80)
+        if (dob < eighty) errors.push('Date of birth cannot be more than 80 years ago')
+        if (form.start_date) {
+          const join = new Date(form.start_date)
+          const ageAtJoin = (join - dob) / (365.25 * 24 * 3600 * 1000)
+          if (ageAtJoin < 18) errors.push('Worker must be at least 18 years old at start date')
+        }
+      }
+    }
     if (!form.trade_role) errors.push('Position / trade is required')
     if (!basicAmt) errors.push('Monthly salary is required')
     if (!form.passport_expiry) errors.push('Passport expiry date is required')
@@ -133,6 +148,7 @@ function OffersPage() {
         first_name: form.first_name,
         last_name: form.last_name,
         nationality: form.nationality,
+        date_of_birth: form.date_of_birth || null,
         passport_number: form.passport_number,
         trade_role: form.trade_role,
         category: form.category,
@@ -298,6 +314,7 @@ function OffersPage() {
                 {passportExpiryStatus.tone === 'warning' && <div style={{marginTop:4,fontSize:11,color:'var(--warning)'}}>⚠ {passportExpiryStatus.message}</div>}
               </div>
               <div className="form-field"><label className="form-label">Nationality *</label><select className="form-select" value={form.nationality} onChange={e => setForm({...form, nationality:e.target.value})}><option value="">Select nationality</option>{NATIONALITIES.map(n => <option key={n} value={n}>{n}</option>)}</select></div>
+              <div className="form-field"><label className="form-label">Date of birth *</label><input className="form-input" type="date" value={form.date_of_birth} max={new Date().toISOString().split('T')[0]} onChange={e => setForm({...form, date_of_birth:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Email</label><input className="form-input" value={form.email} onChange={e => setForm({...form, email:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Position / Trade *</label><select className="form-select" value={form.trade_role} onChange={e => setForm({...form, trade_role:e.target.value})}><option value="">Select position</option>{POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}</select></div>
               <div className="form-field"><label className="form-label">Category</label><select className="form-select" value={form.category} onChange={e => handleCategoryChange(e.target.value)}>{['Permanent Staff','Office Staff'].map(c => <option key={c} value={c}>{c}</option>)}</select></div>
