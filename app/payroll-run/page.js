@@ -5,7 +5,9 @@ import StatusBadge from '../../components/StatusBadge'
 import {
   getPayrollBatches, getPayrollLines, updatePayrollBatch,
   generatePayrollBatch, deletePayrollBatch, getPayrollBatchByMonthYear,
-  addPayrollAdjustment, getAdjustmentsByBatch, lockPayrollBatch
+  addPayrollAdjustment, getAdjustmentsByBatch,
+  approvePayrollBatchOps, rejectPayrollBatchOps,
+  approvePayrollBatchOwner, rejectPayrollBatchOwner
 } from '../../lib/payrollService'
 import { getTimesheetHeaders, getTimesheetLinesByMonth } from '../../lib/timesheetService'
 import { getVisibleWorkers } from '../../lib/workerService'
@@ -61,6 +63,10 @@ export default function PayrollRunPage() {
   const [flagNote, setFlagNote] = useState('')
   const [flaggingWorker, setFlaggingWorker] = useState(null)
   const [step4Approved, setStep4Approved] = useState(false)
+  const [ownerRejected, setOwnerRejected] = useState(false)
+  const [ownerRejectionNote, setOwnerRejectionNote] = useState('')
+  const [showOwnerRejectModal, setShowOwnerRejectModal] = useState(false)
+  const [ownerRejectDraft, setOwnerRejectDraft] = useState('')
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [approvalChecklist, setApprovalChecklist] = useState({conflicts:false,penalties:false,opsApproved:false,carryOver:false,wpsReviewed:false})
   const [generating, setGenerating] = useState(false)
@@ -89,21 +95,42 @@ export default function PayrollRunPage() {
       setPayrollLines(lines)
       const adjs = await getAdjustmentsByBatch(batch.id)
       setPayrollAdjustments(adjs)
-      // Restore step state from batch
+      // Restore step state from batch status
       if (batch.status === 'calculated' || batch.status === 'ops_approved' || batch.status === 'owner_approved' || batch.status === 'locked') {
         setStep1Confirmed(true)
-        setStepStatus(prev => ({...prev, 1:'complete', 2: batch.status === 'calculated' ? 'active' : 'complete'}))
-      }
-      if (batch.ops_approval_status === 'approved') {
+        setStepStatus(prev => ({...prev, 1:'complete', 2:'complete'}))
         setStep2Confirmed(true)
-        setStep3Approved(true)
-        setStepStatus(prev => ({...prev, 2:'complete', 3:'complete', 4:'active'}))
       }
-      if (batch.ops_approval_status === 'rejected') {
+      // calculated + ops pending → Step 3
+      if (batch.status === 'calculated' && batch.ops_approval_status === 'pending') {
+        setStepStatus(prev => ({...prev, 2:'complete', 3:'active'}))
+      }
+      // calculated + ops rejected → Step 2 with rejection banner
+      if (batch.status === 'calculated' && batch.ops_approval_status === 'rejected') {
         setOpsRejected(true)
         setOpsRejectionNote(batch.ops_rejection_reason || '')
+        setStepStatus(prev => ({...prev, 2:'active', 3:'error'}))
       }
-      if (batch.owner_approval_status === 'approved' || batch.status === 'locked') {
+      // ops_approved + owner pending → Step 4
+      if (batch.status === 'ops_approved' && batch.owner_approval_status === 'pending') {
+        setStep3Approved(true)
+        setStepStatus(prev => ({...prev, 3:'complete', 4:'active'}))
+      }
+      // owner_approved + owner pending (post-unlock) → Step 4
+      if (batch.status === 'owner_approved' && batch.owner_approval_status === 'pending') {
+        setStep3Approved(true)
+        setStepStatus(prev => ({...prev, 3:'complete', 4:'active'}))
+      }
+      // ops_approved + owner rejected → Step 4 with rejection banner
+      if (batch.status === 'ops_approved' && batch.owner_approval_status === 'rejected') {
+        setStep3Approved(true)
+        setOwnerRejected(true)
+        setOwnerRejectionNote(batch.owner_rejection_reason || '')
+        setStepStatus(prev => ({...prev, 3:'complete', 4:'error'}))
+      }
+      // locked → Step 5
+      if (batch.status === 'locked') {
+        setStep3Approved(true)
         setStep4Approved(true)
         setStepStatus(prev => ({...prev, 3:'complete', 4:'complete', 5:'active'}))
       }
@@ -178,6 +205,9 @@ export default function PayrollRunPage() {
     setStep3Approved(false)
     setStep4Approved(false)
     setOpsRejected(false)
+    setOpsRejectionNote('')
+    setOwnerRejected(false)
+    setOwnerRejectionNote('')
     setCurrentStep(1)
     setStepStatus({1:'active',2:'locked',3:'locked',4:'locked',5:'locked'})
     setPayrollLines([])
@@ -567,7 +597,13 @@ export default function PayrollRunPage() {
           :(<button className="btn btn-primary" style={{padding:'10px 24px',fontSize:14}} onClick={async () => {
             setStep2Confirmed(true); setStepStatus(prev=>({...prev,2:'complete',3:'active'}))
             if(selectedBatch) {
-              try { await updatePayrollBatch(selectedBatch.id, {status:'calculated'}) } catch(e) { console.error(e) }
+              try {
+                // On resubmission after rejection, reset approval statuses
+                const resubmitFields = { status:'calculated', ops_approval_status:'pending', ops_rejection_reason:null, owner_approval_status:'pending', owner_rejection_reason:null }
+                await updatePayrollBatch(selectedBatch.id, resubmitFields)
+                setOpsRejected(false); setOpsRejectionNote(''); setOwnerRejected(false); setOwnerRejectionNote('')
+                setStep3Approved(false); setStep4Approved(false)
+              } catch(e) { console.error(e) }
             }
             showSuccess('Payroll calculation confirmed — sent for Operations approval'); setCurrentStep(3)
           }}>✓ Confirm & Send for Operations Approval →</button>)}
@@ -578,7 +614,7 @@ export default function PayrollRunPage() {
 
   // ── Step 3: Operations Approval ──
   const Step3OperationsApproval = () => {
-    const canApproveOps = role === 'operations' || role === 'owner'
+    const canApproveOps = role === 'operations' || role === 'owner' || role === 'accounts'
     const filteredW = workers.filter(w => w.category !== 'Office Staff')
     const flaggedCount = Object.keys(flaggedWorkers).length
 
@@ -654,11 +690,15 @@ export default function PayrollRunPage() {
           <button className="btn btn-primary" style={{padding:14,fontSize:14,background:'linear-gradient(135deg,#0d9488,#0891b2)',opacity:flaggedCount>0?0.5:1,cursor:flaggedCount>0?'not-allowed':'pointer'}} disabled={flaggedCount>0} onClick={async () => {
             if(flaggedCount>0) return
             if(!window.confirm(`Confirm: You have reviewed all hours for ${MONTH_NAMES[(selectedMonth||1)-1]} ${selectedYear} and they are correct?`)) return
-            setStep3Approved(true);setStepStatus(prev=>({...prev,3:'complete',4:'active'}))
             if(selectedBatch) {
-              try { await updatePayrollBatch(selectedBatch.id, {ops_approval_status:'approved',ops_approved_by:role==='owner'?'Management':'Operations',ops_approved_at:new Date().toISOString()}) } catch(e) { console.error(e) }
+              try {
+                const approverName = role==='owner'?'Management':role==='accounts'?'Accounts':'Operations'
+                await approvePayrollBatchOps(selectedBatch.id, role, approverName)
+                setSelectedBatch(prev => ({...prev, status:'ops_approved', ops_approval_status:'approved'}))
+                setStep3Approved(true);setStepStatus(prev=>({...prev,3:'complete',4:'active'}))
+                showSuccess('Hours approved by Operations — sent for Management approval');setCurrentStep(4)
+              } catch(e) { showError(e.message) }
             }
-            showSuccess('Hours approved by Operations — sent for Management approval');setCurrentStep(4)
           }}>✓ Approve Hours — Send for Management Approval</button>
         </div>
       </div>)}
@@ -679,9 +719,14 @@ export default function PayrollRunPage() {
     return (<div>
       <InstructionBanner step={4} title="Management Approval" roleLabel="Management / Accounts"
         description="This is the final review before payroll is executed. Review all totals, confirm the pre-approval checklist, and sign off."
-        howTo={['Review the payroll summary cards and WPS split','Expand any worker row to inspect their full breakdown','Complete all 5 checklist items','Click the Approve & Run Payroll button to lock the batch']} />
+        howTo={['Review the payroll summary cards and WPS split','Expand any worker row to inspect their full breakdown','Complete all 5 checklist items','Click Approve & Lock to finalize, or Reject to send back']} />
 
       {!canApprove && <div style={{background:'#f0f9ff',border:'1px solid #bae6fd',borderRadius:8,padding:'12px 16px',marginBottom:16,fontSize:13,color:'#0369a1'}}>ℹ Only Management or Accounts role can approve payroll. Current role: {role}</div>}
+
+      {ownerRejected && (<div style={{background:'#fff7ed',border:'2px solid #fb923c',borderRadius:10,padding:'16px 20px',marginBottom:20}}>
+        <div style={{fontWeight:700,color:'#c2410c',fontSize:14,marginBottom:8}}>⚠ Owner/Accounts rejected this payroll</div>
+        <div style={{fontSize:13,color:'#7c2d12',marginBottom:12,background:'#fef2f2',borderRadius:6,padding:'10px 14px',border:'1px solid #fca5a5'}}><strong>Rejection reason:</strong> {ownerRejectionNote}</div>
+      </div>)}
 
       {step4Approved && <div style={{background:'#f0fdf4',border:'2px solid #86efac',borderRadius:10,padding:'16px 20px',marginBottom:20,display:'flex',alignItems:'center',gap:12}}>
         <span style={{fontSize:24}}>✓</span>
@@ -759,7 +804,10 @@ export default function PayrollRunPage() {
           ))}
         </div>
         <div style={{padding:'0 20px 20px'}}>
-          <button className="btn btn-primary" style={{width:'100%',padding:'14px',fontSize:15,background:allChecked?'linear-gradient(135deg,#0d9488,#0891b2)':'#cbd5e1',cursor:allChecked?'pointer':'not-allowed',border:'none',borderRadius:10,fontWeight:700,color:'white'}} disabled={!allChecked} onClick={() => setShowApprovalModal(true)}>✅ APPROVE & RUN PAYROLL</button>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            <button className="btn btn-secondary" style={{padding:14,fontSize:14,border:'2px solid #dc2626',color:'#dc2626'}} onClick={() => setShowOwnerRejectModal(true)}>✕ Reject — Send back for review</button>
+            <button className="btn btn-primary" style={{padding:'14px',fontSize:15,background:allChecked?'linear-gradient(135deg,#0d9488,#0891b2)':'#cbd5e1',cursor:allChecked?'pointer':'not-allowed',border:'none',borderRadius:10,fontWeight:700,color:'white'}} disabled={!allChecked} onClick={() => setShowApprovalModal(true)}>✅ APPROVE & LOCK PAYROLL</button>
+          </div>
           {!allChecked && <div style={{textAlign:'center',fontSize:11,color:'#94a3b8',marginTop:8}}>Complete all checklist items to enable approval</div>}
         </div>
       </div>)}
@@ -798,6 +846,7 @@ export default function PayrollRunPage() {
         <div>
           <div style={{color:'white',fontSize:18,fontWeight:700,marginBottom:4}}>Payroll Approved & Locked</div>
           <div style={{color:'#94a3b8',fontSize:13}}>{batchLabel} · {totals.workerCount} workers · Net: AED {totals.totalNet.toLocaleString(undefined,{minimumFractionDigits:2})}</div>
+          {selectedBatch?.retain_until && <div style={{color:'#64748b',fontSize:12,marginTop:4}}>Records retained until {new Date(selectedBatch.retain_until).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}</div>}
         </div>
       </div>
 
@@ -920,12 +969,39 @@ export default function PayrollRunPage() {
         <textarea className="form-textarea" rows={4} placeholder="e.g. Worker Ahmed shows 16 hours on Day 5 — he was only on site for 8 hours." value={opsRejectDraft} onChange={e => setOpsRejectDraft(e.target.value)} />
         <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:16}}>
           <button className="btn btn-secondary" onClick={() => {setShowOpsRejectModal(false);setOpsRejectDraft('')}}>Cancel</button>
-          <button className="btn btn-danger" disabled={!opsRejectDraft.trim()} onClick={async () => {
-            setOpsRejected(true);setOpsRejectionNote(opsRejectDraft);setShowOpsRejectModal(false);setStep3Approved(false);setStepStatus(prev=>({...prev,3:'error',4:'locked'}))
+          <button className="btn btn-danger" disabled={!opsRejectDraft.trim() || opsRejectDraft.trim().length < 10} onClick={async () => {
             if(selectedBatch) {
-              try { await updatePayrollBatch(selectedBatch.id, {ops_approval_status:'rejected',ops_rejection_reason:opsRejectDraft}) } catch(e) { console.error(e) }
+              try {
+                const approverName = role==='owner'?'Management':role==='accounts'?'Accounts':'Operations'
+                await rejectPayrollBatchOps(selectedBatch.id, role, approverName, opsRejectDraft)
+                setOpsRejected(true);setOpsRejectionNote(opsRejectDraft);setShowOpsRejectModal(false);setStep3Approved(false);setStepStatus(prev=>({...prev,3:'error',4:'locked'}))
+                setCurrentStep(2);showSuccess('Payroll rejected — HR notified');setOpsRejectDraft('')
+              } catch(e) { showError(e.message);setShowOpsRejectModal(false) }
             }
-            setCurrentStep(2);showSuccess('Payroll rejected — HR notified');setOpsRejectDraft('')
+          }}>✕ Confirm Rejection</button>
+        </div>
+      </div>
+    </div>)}
+
+    {showOwnerRejectModal && (<div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div style={{background:'white',borderRadius:12,padding:28,width:'min(480px,90vw)',boxShadow:'0 20px 60px rgba(0,0,0,0.2)'}}>
+        <h3 style={{fontSize:16,fontWeight:700,marginBottom:4}}>Reject Payroll — Send back for review</h3>
+        <p style={{fontSize:12,color:'#64748b',marginBottom:16}}>Ops approval is preserved. Only the Owner gate reopens. Explain what needs correction.</p>
+        <label className="form-label">Reason for rejection * (min 10 characters)</label>
+        <textarea className="form-textarea" rows={4} placeholder="e.g. Housing allowance for Worker X looks wrong — should be AED 500 not 750." value={ownerRejectDraft} onChange={e => setOwnerRejectDraft(e.target.value)} />
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:16}}>
+          <button className="btn btn-secondary" onClick={() => {setShowOwnerRejectModal(false);setOwnerRejectDraft('')}}>Cancel</button>
+          <button className="btn btn-danger" disabled={!ownerRejectDraft.trim() || ownerRejectDraft.trim().length < 10} onClick={async () => {
+            if(selectedBatch) {
+              try {
+                const approverName = role==='owner'?'Management':role==='accounts'?'Accounts':role
+                await rejectPayrollBatchOwner(selectedBatch.id, role, approverName, ownerRejectDraft)
+                setOwnerRejected(true);setOwnerRejectionNote(ownerRejectDraft);setShowOwnerRejectModal(false)
+                setStep4Approved(false);setStepStatus(prev=>({...prev,4:'error'}))
+                setSelectedBatch(prev => ({...prev, status:'ops_approved', owner_approval_status:'rejected', owner_rejection_reason:ownerRejectDraft}))
+                showSuccess('Payroll rejected by Owner — sent back for review');setOwnerRejectDraft('')
+              } catch(e) { showError(e.message);setShowOwnerRejectModal(false) }
+            }
           }}>✕ Confirm Rejection</button>
         </div>
       </div>
@@ -946,16 +1022,17 @@ export default function PayrollRunPage() {
         <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:16}}>
           <button className="btn btn-secondary" onClick={() => setShowApprovalModal(false)}>Cancel</button>
           <button className="btn btn-primary" style={{padding:'10px 24px',background:'linear-gradient(135deg,#0d9488,#0891b2)'}} onClick={async () => {
-            setStep4Approved(true); setShowApprovalModal(false)
-            setStepStatus(prev=>({...prev,4:'complete',5:'active'}))
             if (selectedBatch) {
               try {
-                await lockPayrollBatch(selectedBatch.id, role === 'owner' ? 'Management' : role)
-                await updatePayrollBatch(selectedBatch.id, {owner_approval_status:'approved',owner_approved_by:role==='owner'?'Management':role,owner_approved_at:new Date().toISOString()})
-              } catch(e) { console.error(e) }
+                const approverName = role==='owner'?'Management':role==='accounts'?'Accounts':role
+                const updated = await approvePayrollBatchOwner(selectedBatch.id, role, approverName)
+                setSelectedBatch(updated)
+                setStep4Approved(true); setShowApprovalModal(false)
+                setStepStatus(prev=>({...prev,4:'complete',5:'active'}))
+                showSuccess(`Payroll approved and locked — records retained until ${updated.retain_until}`)
+                setCurrentStep(5)
+              } catch(e) { showError(e.message); setShowApprovalModal(false) }
             }
-            showSuccess('Payroll approved and locked — proceed to generate files')
-            setCurrentStep(5)
           }}>✅ Approve & Lock Payroll</button>
         </div>
       </div>
