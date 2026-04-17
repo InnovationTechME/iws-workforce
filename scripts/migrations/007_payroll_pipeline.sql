@@ -10,8 +10,14 @@ COMMENT ON COLUMN public.payroll_lines.rate_used
   IS 'Snapshot of workers.hourly_rate at batch-generation time. NULL for monthly-salaried workers.';
 
 -- 2. Unique constraint to prevent duplicate batches per month
-ALTER TABLE public.payroll_batches
-  ADD CONSTRAINT payroll_batches_month_year_unique UNIQUE (month, year);
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'payroll_batches_month_year_unique'
+  ) THEN
+    ALTER TABLE public.payroll_batches
+      ADD CONSTRAINT payroll_batches_month_year_unique UNIQUE (month, year);
+  END IF;
+END $$;
 
 -- 3. Indexes to speed up the RPC
 CREATE INDEX IF NOT EXISTS idx_timesheet_lines_header_worker
@@ -41,7 +47,7 @@ DECLARE
 BEGIN
   -- 1. Guard: no duplicate batch
   IF EXISTS (SELECT 1 FROM payroll_batches WHERE month = p_month AND year = p_year) THEN
-    RAISE EXCEPTION 'Payroll batch already exists for % %', p_month_label, p_year;
+    RAISE EXCEPTION 'Payroll batch already exists for %', p_month_label;
   END IF;
 
   -- 2. Guard: all timesheets for this period must be hr_approved
@@ -58,8 +64,9 @@ BEGIN
   VALUES (p_month, p_year, p_month_label, 'draft')
   RETURNING id INTO v_batch_id;
 
-  -- 4. Insert hourly worker lines (Contract Worker + Subcontract Worker)
-  --    Branch on category — ignore monthly_salary even if populated.
+  -- 4. Hourly workers (Contract + Subcontract) — PURE FLAT RATE (Option A).
+  -- total_hours × hourly_rate for all hours. No OT premium. No holiday premium.
+  -- Per Jo's rule: contract/subcontract workers are flat rate, no exceptions.
   INSERT INTO payroll_lines (
     batch_id, worker_id, basic_salary,
     housing_allowance, transport_allowance, food_allowance, other_allowance, allowances_total,
@@ -72,8 +79,8 @@ BEGIN
   SELECT
     v_batch_id,
     w.id,
-    -- basic_salary: total_hours * hourly_rate (flat rate — OT hours included at same rate)
-    COALESCE(agg.sum_total_hours, 0) * w.hourly_rate,
+    -- basic_salary: total_hours * hourly_rate (pure flat rate)
+    ROUND(COALESCE(agg.sum_total_hours, 0) * w.hourly_rate, 2),
     -- allowances: zero for hourly workers
     0, 0, 0, 0, 0,
     -- base_hourly_rate + rate_used snapshot
@@ -82,23 +89,17 @@ BEGIN
     -- ot1: stored for info, pay = 0 (flat rate — no weekday OT premium)
     COALESCE(agg.sum_ot_hours, 0),
     0,
-    -- ot2: holiday premium = holiday_hours * rate * 0.50 (the extra 50% on top of base)
+    -- ot2: hours stored for info, pay = 0 (flat rate — no holiday premium)
     COALESCE(agg.sum_holiday_hours, 0),
-    ROUND(COALESCE(agg.sum_holiday_hours, 0) * w.hourly_rate * 0.50, 2),
+    0,
     -- total_hours
     COALESCE(agg.sum_total_hours, 0),
-    -- gross_pay = basic + holiday premium
-    ROUND(
-      (COALESCE(agg.sum_total_hours, 0) * w.hourly_rate)
-      + (COALESCE(agg.sum_holiday_hours, 0) * w.hourly_rate * 0.50)
-    , 2),
+    -- gross_pay = total_hours * hourly_rate (flat, no premium)
+    ROUND(COALESCE(agg.sum_total_hours, 0) * w.hourly_rate, 2),
     -- deductions: 0 for PR #6
     0,
     -- net_pay = gross (no deductions in v1)
-    ROUND(
-      (COALESCE(agg.sum_total_hours, 0) * w.hourly_rate)
-      + (COALESCE(agg.sum_holiday_hours, 0) * w.hourly_rate * 0.50)
-    , 2),
+    ROUND(COALESCE(agg.sum_total_hours, 0) * w.hourly_rate, 2),
     -- payment method from worker
     w.payment_method,
     w.c3_status,
