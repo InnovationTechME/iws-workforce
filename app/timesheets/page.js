@@ -33,6 +33,7 @@ export default function TimesheetsPage() {
   const [uploadRestriction, setUploadRestriction] = useState(null)
   const [showHeaderDrawer, setShowHeaderDrawer] = useState(false)
   const [hForm, setHForm] = useState({ client_name:'', project_site:'', job_no:'', date:'' })
+  const [monthLocked, setMonthLocked] = useState(false)
 
   useEffect(() => {
     setHeaders(getTimesheetHeaders()); setWorkers(getVisibleWorkers())
@@ -46,6 +47,16 @@ export default function TimesheetsPage() {
   useEffect(() => {
     if (selectedMonth && selectedYear && selectedClient) setUploadRestriction(canUploadTimesheet(selectedMonth, selectedYear, selectedClient))
   }, [selectedMonth, selectedYear, selectedClient])
+
+  useEffect(() => {
+    async function checkLock() {
+      if (selectedMonth && selectedYear) {
+        const locked = await isMonthLocked(selectedMonth, selectedYear)
+        setMonthLocked(locked)
+      }
+    }
+    checkLock()
+  }, [selectedMonth, selectedYear])
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0]
@@ -187,7 +198,7 @@ export default function TimesheetsPage() {
             )}
 
             {/* Locked month indicator */}
-            {isMonthLocked(selectedMonth, selectedYear, selectedClient) && (
+            {monthLocked && (
               <div style={{background:'#fef2f2',border:'2px solid #fca5a5',borderRadius:8,padding:'14px 16px',marginBottom:16,display:'flex',alignItems:'center',gap:12}}>
                 <span style={{fontSize:24}}>🔒</span>
                 <div>
@@ -197,7 +208,7 @@ export default function TimesheetsPage() {
               </div>
             )}
 
-            {uploadRestriction?.allowed && (<>
+            {uploadRestriction?.allowed && !monthLocked && (<>
               <div style={{border:'2px dashed var(--border)',borderRadius:10,padding:32,textAlign:'center',marginBottom:16}}>
                 <div style={{fontSize:32,marginBottom:8}}>📊</div>
                 <label style={{display:'inline-block',padding:'10px 20px',background:'var(--teal)',color:'white',borderRadius:6,cursor:'pointer',fontSize:13,fontWeight:600}}>

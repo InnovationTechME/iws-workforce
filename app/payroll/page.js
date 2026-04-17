@@ -5,7 +5,7 @@ import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import {
   getPayrollBatches, getPayrollLines, getPayrollBatchById,
-  getAdjustmentsByBatch
+  getAdjustmentsByBatch, unlockPayrollBatch, extendRetainUntil
 } from '../../lib/payrollService'
 import { getVisibleWorkers } from '../../lib/workerService'
 import { formatCurrency, getStatusTone } from '../../lib/utils'
@@ -23,6 +23,8 @@ export default function PayrollPage() {
   const [loading, setLoading] = useState(true)
   const [workers, setWorkers] = useState([])
   const [showWhatsApp, setShowWhatsApp] = useState(false)
+  const [showUnlockModal, setShowUnlockModal] = useState(false)
+  const [unlockReason, setUnlockReason] = useState('')
 
   useEffect(() => {
     async function init() {
@@ -101,9 +103,9 @@ export default function PayrollPage() {
         </div>
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
           <select className="filter-select" value={selectedBatchId||''} onChange={e => handleBatchChange(e.target.value)} style={{minWidth:200}}>
-            {allBatches.map(b => <option key={b.id} value={b.id}>{b.month_label}{b.status === 'locked' ? ' 🔒' : ''}{b.status === 'draft' ? ' (Draft)' : ''}</option>)}
+            {allBatches.map(b => <option key={b.id} value={b.id}>{b.month_label}{b.status === 'locked' ? ' 🔒' : b.status === 'ops_approved' ? ' ✓ Ops' : b.status === 'owner_approved' ? ' ✓ Approved' : b.status === 'draft' ? ' (Draft)' : ''}</option>)}
           </select>
-          <StatusBadge label={batch.status === 'locked' ? '🔒 Locked' : batch.status} tone={batch.status === 'locked' ? 'danger' : batch.status === 'calculated' ? 'warning' : 'neutral'} />
+          <StatusBadge label={batch.status === 'locked' ? '🔒 Locked' : batch.status === 'ops_approved' ? '✓ Ops Approved' : batch.status === 'owner_approved' ? '✓ Approved' : batch.status === 'calculated' ? '⏳ Awaiting Approval' : batch.status} tone={batch.status === 'locked' ? 'danger' : batch.status === 'ops_approved' ? 'info' : batch.status === 'owner_approved' ? 'success' : batch.status === 'calculated' ? 'warning' : 'neutral'} />
         </div>
       </div>
 
@@ -112,12 +114,27 @@ export default function PayrollPage() {
         <div style={{background:'#fef2f2',border:'2px solid #fca5a5',borderRadius:12,padding:'20px 24px',marginBottom:20}}>
           <div style={{display:'flex',gap:16,alignItems:'flex-start'}}>
             <div style={{fontSize:42}}>🔒</div>
-            <div>
+            <div style={{flex:1}}>
               <div style={{fontSize:18,fontWeight:700,color:'#dc2626'}}>PAYROLL LOCKED</div>
-              <div style={{fontSize:12,color:'var(--muted)',marginTop:4}}>Locked on {batch.locked_at ? new Date(batch.locked_at).toLocaleDateString('en-GB') : '—'} by {batch.locked_by}</div>
+              <div style={{fontSize:12,color:'var(--muted)',marginTop:4}}>Locked on {batch.locked_at ? new Date(batch.locked_at).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : '—'} by {batch.locked_by}</div>
+              {batch.retain_until && <div style={{fontSize:12,color:'#64748b',marginTop:4}}>Records retained until {new Date(batch.retain_until).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}{role === 'owner' && <button className="btn btn-ghost btn-sm" style={{fontSize:11,color:'#0891b2',marginLeft:8}} onClick={async () => {
+                const newDate = prompt('Extend retain_until to (YYYY-MM-DD):', '')
+                if (!newDate) return
+                try { const updated = await extendRetainUntil(batch.id, role, newDate); setBatch(updated); alert('Retention date extended.') } catch(e) { alert(e.message) }
+              }}>Extend</button>}</div>}
               <div style={{fontSize:12,color:'#64748b',marginTop:6}}>This payroll cannot be edited. Corrections must be made in the following month.</div>
             </div>
+            {role === 'owner' && <button className="btn btn-secondary btn-sm" style={{color:'#dc2626',border:'1px solid #dc2626',flexShrink:0}} onClick={() => setShowUnlockModal(true)}>Unlock</button>}
           </div>
+        </div>
+      )}
+
+      {/* Unlocked-after-lock amber banner */}
+      {batch.status === 'owner_approved' && batch.unlocked_at && (
+        <div style={{background:'#fffbeb',border:'2px solid #fbbf24',borderRadius:12,padding:'16px 20px',marginBottom:20}}>
+          <div style={{fontWeight:700,color:'#92400e',marginBottom:4}}>Batch was unlocked on {new Date(batch.unlocked_at).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} by {batch.unlocked_by}</div>
+          <div style={{fontSize:12,color:'#78350f'}}>Reason: {batch.unlock_reason}</div>
+          <div style={{fontSize:12,color:'#92400e',marginTop:6}}>Re-lock via Payroll Run to restore.</div>
         </div>
       )}
 
@@ -241,6 +258,26 @@ export default function PayrollPage() {
           </div>
         )}
       </div>
+      {showUnlockModal && (
+        <div className="drawer-backdrop" onClick={() => setShowUnlockModal(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:12,padding:24,width:'min(480px,90vw)',margin:'auto',position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',boxShadow:'0 20px 60px rgba(0,0,0,0.15)'}}>
+            <h3 style={{fontSize:16,fontWeight:700,marginBottom:4}}>Unlock Payroll Batch</h3>
+            <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:'10px 14px',marginBottom:16,fontSize:12,color:'#dc2626'}}>This will revert the batch to Owner-Approved state. You will need to re-lock it. This action is logged.</div>
+            <label className="form-label">Reason for unlocking (minimum 20 characters, required) *</label>
+            <textarea className="form-textarea" rows={4} placeholder="e.g. Discovered incorrect housing allowance for worker — need to correct before WPS submission." value={unlockReason} onChange={e => setUnlockReason(e.target.value)} />
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:16}}>
+              <button className="btn btn-secondary" onClick={() => { setShowUnlockModal(false); setUnlockReason('') }}>Cancel</button>
+              <button className="btn btn-danger" disabled={unlockReason.trim().length < 20} onClick={async () => {
+                try {
+                  await unlockPayrollBatch(batch.id, role, 'Management', unlockReason)
+                  setShowUnlockModal(false); setUnlockReason('')
+                  await loadBatch(batch.id)
+                } catch(e) { alert(e.message) }
+              }}>Confirm Unlock</button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   )
 }

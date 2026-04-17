@@ -1,99 +1,82 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import StatusBadge from './StatusBadge'
-import { getPendingApprovalsForRole, approveTimesheet, rejectTimesheet, approvePayrollBatch, rejectPayrollBatch, approveWarning, rejectWarning, approveTermination, rejectTermination, getWorkerDisplay } from '../lib/mockStore'
+import { getBatchesPendingApproval } from '../lib/payrollService'
 import { getRole } from '../lib/mockAuth'
-import { formatDate } from '../lib/utils'
 
 export default function ApprovalsDashboard() {
+  const router = useRouter()
   const [role, setRoleState] = useState(null)
-  const [approvals, setApprovals] = useState(null)
-  const [showReject, setShowReject] = useState(false)
-  const [rejectCtx, setRejectCtx] = useState(null)
-  const [rejectReason, setRejectReason] = useState('')
+  const [payrollItems, setPayrollItems] = useState([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const r = getRole()
-    setRoleState(r)
-    setApprovals(getPendingApprovalsForRole(r))
+    async function load() {
+      try {
+        const r = getRole()
+        setRoleState(r)
+        const batches = await getBatchesPendingApproval(r)
+        setPayrollItems(batches)
+      } catch (err) {
+        console.error('ApprovalsDashboard load error:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
   }, [])
 
-  const refresh = () => { if (role) setApprovals(getPendingApprovalsForRole(role)) }
+  if (loading || !role) return null
+  if (payrollItems.length === 0) return null
 
-  const handleApprove = (type, id) => {
-    const userName = role === 'owner' ? 'Owner' : 'Operations'
-    if (type === 'timesheet') approveTimesheet(id, role, userName)
-    else if (type === 'payroll') approvePayrollBatch(role, userName)
-    else if (type === 'warning') approveWarning(id, role, userName)
-    else if (type === 'termination') approveTermination(id, role, userName)
-    refresh()
+  const getStepForBatch = (b) => {
+    if (b.status === 'calculated' && b.ops_approval_status === 'pending') return 3
+    if (b.status === 'ops_approved' && b.owner_approval_status === 'pending') return 4
+    if (b.ops_approval_status === 'rejected') return 2
+    if (b.owner_approval_status === 'rejected') return 4
+    return 3
   }
 
-  const handleRejectClick = (type, id) => { setRejectCtx({ type, id }); setShowReject(true) }
-
-  const handleRejectConfirm = () => {
-    if (!rejectReason.trim()) return
-    const userName = role === 'owner' ? 'Owner' : 'Operations'
-    const { type, id } = rejectCtx
-    if (type === 'timesheet') rejectTimesheet(id, role, userName, rejectReason)
-    else if (type === 'payroll') rejectPayrollBatch(role, userName, rejectReason)
-    else if (type === 'warning') rejectWarning(id, role, userName, rejectReason)
-    else if (type === 'termination') rejectTermination(id, role, userName, rejectReason)
-    setShowReject(false); setRejectReason(''); setRejectCtx(null); refresh()
+  const getBadge = (b) => {
+    if (b.ops_approval_status === 'rejected') return { label: 'Ops Rejected', tone: 'danger' }
+    if (b.owner_approval_status === 'rejected') return { label: 'Owner Rejected', tone: 'danger' }
+    if (b.status === 'ops_approved' && b.owner_approval_status === 'pending') return { label: 'Awaiting Owner', tone: 'warning' }
+    if (b.status === 'calculated' && b.ops_approval_status === 'pending') return { label: 'Awaiting Ops', tone: 'warning' }
+    return { label: b.status, tone: 'neutral' }
   }
-
-  if (!approvals) return null
-  const total = approvals.timesheets.length + approvals.payroll.length + approvals.warnings.length + approvals.terminations.length + approvals.leave.length
-  if (total === 0) return null
-
-  const Section = ({ title, items, type, tone, renderItem }) => items.length === 0 ? null : (
-    <div style={{marginBottom:16}}>
-      <div style={{fontSize:12,fontWeight:700,color:'var(--text)',marginBottom:8}}>{title} ({items.length})</div>
-      {items.map((item, i) => (
-        <div key={item.id || i} style={{background:tone==='danger'?'#fff1f2':tone==='warning'?'#fffbeb':'#eff6ff',border:'1px solid var(--border)',borderRadius:8,padding:'12px 16px',marginBottom:6,display:'flex',justifyContent:'space-between',alignItems:'center',gap:12}}>
-          <div style={{flex:1}}>{renderItem(item)}</div>
-          <div style={{display:'flex',gap:6,flexShrink:0}}>
-            <button className="btn btn-teal btn-sm" onClick={() => handleApprove(type, item.id)}>✓ Approve</button>
-            <button className="btn btn-danger btn-sm" onClick={() => handleRejectClick(type, item.id)}>✕ Reject</button>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
 
   return (
-    <>
-      <div className="panel" style={{border:'2px solid var(--warning-border)',background:'#fffdf7'}}>
-        <div className="panel-header">
-          <div><h2>Pending Approvals</h2><p>{total} items require your attention</p></div>
-          <StatusBadge label={`${total} pending`} tone="warning" />
-        </div>
-
-        <Section title="Timesheets" items={approvals.timesheets} type="timesheet" tone="info"
-          renderItem={h => <><div style={{fontWeight:600,fontSize:13}}>{h.client_name} — {h.project_site}</div><div style={{fontSize:11,color:'var(--muted)'}}>Job: {h.job_no} · {formatDate(h.date)}</div></>} />
-
-        <Section title="Payroll Batch" items={approvals.payroll} type="payroll" tone="info"
-          renderItem={b => <><div style={{fontWeight:600,fontSize:13}}>{b.month_label} Payroll</div><div style={{fontSize:11,color:'var(--muted)'}}>Generated by {b.generated_by}{role==='owner' && b.operations_approval_status==='approved' ? ' · ✓ Ops approved' : ''}</div></>} />
-
-        <Section title="Warning Letters" items={approvals.warnings} type="warning" tone="warning"
-          renderItem={w => { const d = getWorkerDisplay(w.worker_id); return <><div style={{fontWeight:600,fontSize:13}}>{d.display}</div><div style={{fontSize:11,color:'var(--muted)'}}>{w.warning_type} — {w.reason?.slice(0,60)}</div></> }} />
-
-        <Section title="Terminations" items={approvals.terminations} type="termination" tone="danger"
-          renderItem={t => { const d = getWorkerDisplay(t.worker_id); return <><div style={{fontWeight:600,fontSize:13}}>{d.display}</div><div style={{fontSize:11,color:'var(--muted)'}}>Reason: {t.reason} · Last day: {formatDate(t.last_working_date)}</div></> }} />
+    <div className="panel" style={{border:'2px solid var(--warning-border)',background:'#fffdf7'}}>
+      <div className="panel-header">
+        <div><h2>Pending Approvals</h2><p>{payrollItems.length} payroll item{payrollItems.length !== 1 ? 's' : ''} require{payrollItems.length === 1 ? 's' : ''} your attention</p></div>
+        <StatusBadge label={`${payrollItems.length} pending`} tone="warning" />
       </div>
 
-      {showReject && (
-        <div className="drawer-backdrop" onClick={() => setShowReject(false)}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:12,padding:24,width:'min(420px,90vw)',margin:'auto',position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',boxShadow:'0 20px 60px rgba(0,0,0,0.15)'}}>
-            <h3 style={{fontSize:15,fontWeight:600,marginBottom:12}}>Rejection reason required</h3>
-            <textarea className="form-textarea" value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Enter reason for rejection..." rows={4} />
-            <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:12}}>
-              <button className="btn btn-secondary" onClick={() => { setShowReject(false); setRejectReason('') }}>Cancel</button>
-              <button className="btn btn-danger" onClick={handleRejectConfirm}>Confirm Rejection</button>
+      <div style={{marginBottom:16}}>
+        <div style={{fontSize:12,fontWeight:700,color:'var(--text)',marginBottom:8}}>Payroll Batches ({payrollItems.length})</div>
+        {payrollItems.map(b => {
+          const badge = getBadge(b)
+          const step = getStepForBatch(b)
+          return (
+            <div key={b.id} style={{background:'#eff6ff',border:'1px solid var(--border)',borderRadius:8,padding:'12px 16px',marginBottom:6,display:'flex',justifyContent:'space-between',alignItems:'center',gap:12}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:600,fontSize:13}}>{b.month_label} Payroll</div>
+                <div style={{fontSize:11,color:'var(--muted)'}}>
+                  {b.worker_count} workers · Net AED {Number(b.total_net || 0).toLocaleString(undefined,{minimumFractionDigits:2})}
+                  {b.ops_approval_status === 'approved' && ' · ✓ Ops approved'}
+                  {b.ops_approval_status === 'rejected' && ` · ✕ Ops rejected: ${(b.ops_rejection_reason || '').slice(0, 60)}`}
+                  {b.owner_approval_status === 'rejected' && ` · ✕ Owner rejected: ${(b.owner_rejection_reason || '').slice(0, 60)}`}
+                </div>
+              </div>
+              <div style={{display:'flex',gap:6,alignItems:'center',flexShrink:0}}>
+                <StatusBadge label={badge.label} tone={badge.tone} />
+                <button className="btn btn-teal btn-sm" onClick={() => router.push(`/payroll-run?step=${step}`)}>Review →</button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
-    </>
+          )
+        })}
+      </div>
+    </div>
   )
 }

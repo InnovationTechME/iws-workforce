@@ -48,13 +48,16 @@ export default function LoginPage() {
       </div>
 
       {!showPinEntry ? (
-        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:16,width:'100%',maxWidth:640}}>
-          {Object.entries(ROLES).map(([key, role]) => (
-            <button key={key} onClick={() => { setSelectedRole(key); setShowPinEntry(true); setPin(''); setPinError(false) }} style={{background:'#fff',border:'0.5px solid #e2e8f0',borderRadius:12,padding:'20px 16px',cursor:'pointer',textAlign:'left',transition:'all .15s',display:'flex',flexDirection:'column',gap:6}} onMouseEnter={e=>{e.currentTarget.style.borderColor='#1d4ed8';e.currentTarget.style.boxShadow='0 0 0 3px rgba(29,78,216,.1)'}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e2e8f0';e.currentTarget.style.boxShadow='none'}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:16,width:'100%',maxWidth:540}}>
+          {Object.entries(ROLES).map(([key, role]) => {
+            const hoverColor = role.badgeColor || '#1d4ed8'
+            return (
+            <button key={key} onClick={() => { setSelectedRole(key); setShowPinEntry(true); setPin(''); setPinError(false) }} style={{background:'#fff',border:'0.5px solid #e2e8f0',borderRadius:12,padding:'20px 16px',cursor:'pointer',textAlign:'left',transition:'all .15s',display:'flex',flexDirection:'column',gap:6}} onMouseEnter={e=>{e.currentTarget.style.borderColor=hoverColor;e.currentTarget.style.boxShadow=`0 0 0 3px ${hoverColor}1a`}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e2e8f0';e.currentTarget.style.boxShadow='none'}}>
               <span style={{fontSize:14,fontWeight:600,color:'#0f172a'}}>{role.label}</span>
               <span style={{fontSize:12,color:'#64748b',lineHeight:1.4}}>{role.description}</span>
             </button>
-          ))}
+            )
+          })}
         </div>
       ) : (
         <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 4px 24px rgba(0,0,0,0.1)',maxWidth:320,width:'100%',margin:'0 auto',textAlign:'center'}}>
