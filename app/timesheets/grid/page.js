@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import AppShell from '../../../components/AppShell'
 import { supabase } from '../../../lib/supabaseClient'
@@ -13,7 +13,7 @@ const DAY_LETTERS = ['Su','Mo','Tu','We','Th','Fr','Sa']
 
 const INNOVATION_INTERNAL_ID = 'b970a080-59aa-440c-aff0-27f9b4d7610c'
 
-export default function TimesheetGridPage() {
+function TimesheetGridContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const role = getRole()
@@ -524,5 +524,13 @@ export default function TimesheetGridPage() {
       {/* Close popover on outside click */}
       {activePopover && <div style={{position:'fixed',inset:0,zIndex:40}} onClick={() => setActivePopover(null)} />}
     </AppShell>
+  )
+}
+
+export default function TimesheetGridPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-slate-500">Loading timesheet grid...</div>}>
+      <TimesheetGridContent />
+    </Suspense>
   )
 }
