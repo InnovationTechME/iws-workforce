@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
@@ -15,6 +16,7 @@ const MONTHS = ['January','February','March','April','May','June','July','August
 const toneMap = { checked:'success', approved:'success', matched:'success', pending:'danger', pending_owner:'warning', under_review:'warning', client_clarification:'warning', not_required:'neutral' }
 
 export default function TimesheetsPage() {
+  const router = useRouter()
   const [headers, setHeaders] = useState([])
   const [selected, setSelected] = useState(null)
   const [lines, setLines] = useState([])
@@ -117,7 +119,13 @@ export default function TimesheetsPage() {
 
   return (
     <AppShell pageTitle="Timesheets">
-      <PageHeader eyebrow="Timesheets" title="Client timesheets" description="Upload client Excel timesheets, review hours in calendar view, and approve for payroll."
+      <div style={{background:'linear-gradient(135deg,#0d9488,#0891b2)',borderRadius:10,padding:'20px 24px',marginBottom:20,color:'white'}}>
+        <h3 style={{fontSize:18,fontWeight:700,marginBottom:6}}>Master Timesheet Grid</h3>
+        <p style={{fontSize:13,marginBottom:14,opacity:0.9,lineHeight:1.5}}>Enter timesheet hours directly in a grid with auto-split OT, conflict detection, and Excel upload quick-fill. Replaces the old upload-only workflow.</p>
+        <button onClick={() => router.push('/timesheets/grid')} style={{padding:'8px 20px',background:'white',color:'#0d9488',border:'none',borderRadius:6,fontWeight:600,fontSize:13,cursor:'pointer'}}>Open Master Grid \u2192</button>
+      </div>
+
+      <PageHeader eyebrow="Timesheets" title="Client timesheets (legacy)" description="Upload client Excel timesheets, review hours in calendar view, and approve for payroll."
         actions={<div style={{display:'flex',gap:8}}>
           <button className="btn btn-primary" onClick={() => setView('upload')}>📁 Upload Client Timesheet</button>
           <button className="btn btn-secondary" onClick={() => setShowHeaderDrawer(true)}>+ Manual Entry</button>

@@ -5,10 +5,11 @@ import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import ConfirmDialog from '../../components/ConfirmDialog'
 import {
-  getOffboarding, getVisibleWorkers, initiateOffboarding,
+  initiateOffboarding,
   tickOffboardingItem, canCloseOffboarding, closeOffboarding,
   OFFBOARDING_ITEMS
 } from '../../lib/mockStore'
+import { supabase } from '../../lib/supabaseClient'
 import { getRole } from '../../lib/mockAuth'
 import { formatDate, formatCurrency } from '../../lib/utils'
 import { calculateFinalSettlement } from '../../lib/finalSettlement'
@@ -27,9 +28,17 @@ export default function OffboardingExitPage() {
   const [noticeServedDays, setNoticeServedDays] = useState(0)
 
   useEffect(() => {
-    setRecords(getOffboarding())
-    setWorkers(getVisibleWorkers())
-    setRoleState(getRole())
+    async function load() {
+      const { data: activeWorkers } = await supabase
+        .from('workers')
+        .select('id, full_name, worker_number, category')
+        .eq('status', 'active')
+        .order('worker_number')
+      setWorkers(activeWorkers || [])
+      setRecords(getOffboarding())
+      setRoleState(getRole())
+    }
+    load()
   }, [])
 
   const refresh = () => {

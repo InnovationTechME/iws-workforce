@@ -13,6 +13,7 @@ import { getTimesheetHeaders, getTimesheetLinesByMonth } from '../../lib/timeshe
 import { getVisibleWorkers } from '../../lib/workerService'
 import { getPublicHolidaysByYear } from '../../lib/publicHolidayService'
 import { getRole } from '../../lib/mockAuth'
+import { buildWaLink, starterKey, STARTERS } from '../../lib/whatsappTemplates'
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
@@ -908,6 +909,13 @@ export default function PayrollRunPage() {
                         await downloadPayslipPDF(w, line, selectedBatch)
                       } finally { setPdfWorker(null) }
                     }}>{pdfWorker === line.id ? '...' : '📄 PDF'}</button>
+                  {w.whatsapp_number && (() => {
+                    const monthLabel = selectedBatch?.month_label || ''
+                    const netStr = Number(line.net_pay || 0).toLocaleString(undefined, {minimumFractionDigits: 2})
+                    const sk = starterKey('payslip', w.preferred_language || 'en')
+                    const waUrl = buildWaLink(w.whatsapp_number, sk, { month: monthLabel, net: netStr })
+                    return waUrl ? <a href={waUrl} target="_blank" rel="noreferrer" style={{background:'#25d366',color:'white',border:'none',borderRadius:4,padding:'2px 6px',fontSize:10,fontWeight:600,textDecoration:'none',marginLeft:4}}>WhatsApp</a> : null
+                  })()}
                 </td>
               </tr>)
             })}
