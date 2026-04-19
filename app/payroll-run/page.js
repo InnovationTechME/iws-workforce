@@ -77,6 +77,8 @@ export default function PayrollRunPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
   const [deleting, setDeleting] = useState(false)
+  const [zipping, setZipping] = useState(false)
+  const [pdfWorker, setPdfWorker] = useState(null)
   // Selected month/year for batch generation
   const [selectedMonth, setSelectedMonth] = useState(null)
   const [selectedYear, setSelectedYear] = useState(null)
@@ -837,10 +839,13 @@ export default function PayrollRunPage() {
     }
 
     return (<div>
+      <div className="no-print">
       <InstructionBanner step={5} title="Run & Distribute" roleLabel="HR Admin / Management"
         description="Payroll has been approved. Download the WPS file and distribute to workers."
         howTo={['Download the WPS Excel file for Endered/C3 upload','The batch is now locked — no further edits are possible']} />
+      </div>
 
+      <div id="summary-print-area">
       <div style={{background:'linear-gradient(135deg,#0f172a,#1e293b)',borderRadius:12,padding:'24px 28px',marginBottom:24,display:'flex',alignItems:'center',gap:16}}>
         <div style={{width:48,height:48,borderRadius:'50%',background:'#16a34a',display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,flexShrink:0}}>🔒</div>
         <div>
@@ -850,7 +855,7 @@ export default function PayrollRunPage() {
         </div>
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:24}}>
+      <div className="no-print" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16,marginBottom:24}}>
         <div style={{background:'white',border:'1.5px solid #e2e8f0',borderRadius:10,padding:'20px',textAlign:'center'}}>
           <div style={{fontSize:32,marginBottom:8}}>📊</div>
           <div style={{fontSize:14,fontWeight:700,color:'#0f172a',marginBottom:4}}>WPS Excel</div>
@@ -858,17 +863,32 @@ export default function PayrollRunPage() {
           <button className="btn btn-primary btn-sm" onClick={generateWPSExcel}>Download .xlsx</button>
         </div>
         <div style={{background:'white',border:'1.5px solid #e2e8f0',borderRadius:10,padding:'20px',textAlign:'center'}}>
+          <div style={{fontSize:32,marginBottom:8}}>📦</div>
+          <div style={{fontSize:14,fontWeight:700,color:'#0f172a',marginBottom:4}}>All Payslips</div>
+          <div style={{fontSize:11,color:'#64748b',marginBottom:12}}>Download all as PDF ZIP</div>
+          <button className="btn btn-primary btn-sm" disabled={zipping} onClick={async () => {
+            setZipping(true)
+            try {
+              const { downloadBatchPayslipsZip } = await import('../../lib/payslipPDF')
+              await downloadBatchPayslipsZip(selectedBatch, payrollLines)
+            } finally { setZipping(false) }
+          }}>{zipping ? 'Generating...' : 'Download ZIP'}</button>
+        </div>
+        <div style={{background:'white',border:'1.5px solid #e2e8f0',borderRadius:10,padding:'20px',textAlign:'center'}}>
           <div style={{fontSize:32,marginBottom:8}}>🖨</div>
           <div style={{fontSize:14,fontWeight:700,color:'#0f172a',marginBottom:4}}>Summary Print</div>
           <div style={{fontSize:11,color:'#64748b',marginBottom:12}}>Full payroll summary report</div>
-          <button className="btn btn-secondary btn-sm" onClick={() => window.print()}>Print</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => {
+            document.body.classList.add('printing-summary')
+            setTimeout(() => { window.print(); setTimeout(() => document.body.classList.remove('printing-summary'), 500) }, 50)
+          }}>Print</button>
         </div>
       </div>
 
       <div className="panel" style={{marginBottom:20}}>
         <div className="panel-header"><div><h2>Payroll Lines — {batchLabel}</h2><p>{payrollLines.length} workers</p></div></div>
         <div className="table-wrap"><table>
-          <thead><tr><th>Worker</th><th>Category</th><th>Payment</th><th style={{textAlign:'right'}}>Gross</th><th style={{textAlign:'right'}}>Net Pay</th></tr></thead>
+          <thead><tr><th>Worker</th><th>Category</th><th>Payment</th><th style={{textAlign:'right'}}>Gross</th><th style={{textAlign:'right'}}>Net Pay</th><th className="no-print" style={{width:60}}></th></tr></thead>
           <tbody>
             {payrollLines.map(line => {
               const w = line.worker || {}
@@ -878,6 +898,17 @@ export default function PayrollRunPage() {
                 <td><StatusBadge label={line.payment_method||'WPS'} tone={line.payment_method==='Cash'?'danger':line.payment_method==='Non-WPS'?'warning':'success'} /></td>
                 <td style={{textAlign:'right',fontSize:12}}>AED {Number(line.gross_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
                 <td style={{textAlign:'right',fontSize:13,fontWeight:700,color:'#0d9488'}}>AED {Number(line.net_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                <td className="no-print" style={{textAlign:'center'}}>
+                  <button style={{background:'none',border:'none',cursor:'pointer',color:'#0d9488',fontSize:12,fontWeight:600,padding:'2px 6px'}}
+                    disabled={pdfWorker === line.id}
+                    onClick={async () => {
+                      setPdfWorker(line.id)
+                      try {
+                        const { downloadPayslipPDF } = await import('../../lib/payslipPDF')
+                        await downloadPayslipPDF(w, line, selectedBatch)
+                      } finally { setPdfWorker(null) }
+                    }}>{pdfWorker === line.id ? '...' : '📄 PDF'}</button>
+                </td>
               </tr>)
             })}
           </tbody>
@@ -889,6 +920,7 @@ export default function PayrollRunPage() {
           <span>🔒</span> Batch locked · {new Date().toLocaleDateString('en-GB')}
         </div>
       </div>
+      </div>{/* end summary-print-area */}
     </div>)
   }
 

@@ -41,6 +41,13 @@ export default function WorkerDetailPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [viewingRef, setViewingRef] = useState(null)
+  const [payslipRows, setPayslipRows] = useState([])
+  const [tsMonths, setTsMonths] = useState([])
+  const [payslipLoading, setPayslipLoading] = useState(false)
+  const [tsLoading, setTsLoading] = useState(false)
+  const [pdfBusy, setPdfBusy] = useState(null)
+  const [editingWhatsApp, setEditingWhatsApp] = useState(false)
+  const [whatsAppDraft, setWhatsAppDraft] = useState('')
 
   const handleView = async (fileRef) => {
     if (!fileRef) return
@@ -78,6 +85,42 @@ export default function WorkerDetailPage() {
     })()
     return () => { cancelled = true }
   }, [id])
+
+  // Lazy-load payslips when tab is selected
+  useEffect(() => {
+    if (tab !== 'payslips' || payslipRows.length > 0 || payslipLoading) return
+    setPayslipLoading(true)
+    supabase.from('payroll_lines')
+      .select('*, payroll_batches!inner(month, year, month_label, status)')
+      .eq('worker_id', id)
+      .then(({ data }) => { setPayslipRows(data || []); setPayslipLoading(false) })
+      .catch(() => setPayslipLoading(false))
+  }, [tab, id])
+
+  // Lazy-load timesheet months when tab is selected
+  useEffect(() => {
+    if (tab !== 'timesheets' || tsMonths.length > 0 || tsLoading) return
+    setTsLoading(true)
+    supabase.from('timesheet_lines')
+      .select('header_id, total_hours, ot_hours, ot1_hours, timesheet_headers!inner(month, year, month_label, client_name)')
+      .eq('worker_id', id)
+      .then(({ data }) => {
+        // Group by header to get monthly summaries
+        const byHeader = {}
+        ;(data || []).forEach(row => {
+          const h = row.timesheet_headers || {}
+          if (!byHeader[row.header_id]) {
+            byHeader[row.header_id] = { header_id: row.header_id, month_label: h.month_label, client_name: h.client_name, month: h.month, year: h.year, total_hours: 0, ot_hours: 0 }
+          }
+          byHeader[row.header_id].total_hours += Number(row.total_hours || 0)
+          byHeader[row.header_id].ot_hours += Number(row.ot_hours || row.ot1_hours || 0)
+        })
+        const sorted = Object.values(byHeader).sort((a, b) => (b.year - a.year) || (b.month - a.month))
+        setTsMonths(sorted)
+        setTsLoading(false)
+      })
+      .catch(() => setTsLoading(false))
+  }, [tab, id])
 
   if (!worker) return <AppShell pageTitle="Worker"><div className="page-shell"><div className="panel"><div className="empty-state"><h3>Worker not found</h3></div></div></div></AppShell>
 
@@ -168,7 +211,7 @@ export default function WorkerDetailPage() {
         {saveBanner && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:6,padding:'10px 14px',color:'#991b1b',fontSize:13,marginBottom:12}}>⚠ {saveBanner}</div>}
 
         <div className="tabs">
-          {['profile','documents','certifications','warnings','letters'].map(t => <button key={t} className={`tab${tab===t?' active':''}`} onClick={() => setTab(t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
+          {['profile','documents','certifications','warnings','letters','payslips','timesheets'].map(t => <button key={t} className={`tab${tab===t?' active':''}`} onClick={() => setTab(t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>)}
         </div>
 
         {tab === 'profile' && (
@@ -188,8 +231,26 @@ export default function WorkerDetailPage() {
               </div>
               <div>
                 <div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>WhatsApp</div>
-                <div style={{fontSize:13,fontWeight:500}}>
-                  {worker.whatsapp_number ? <a href={`https://wa.me/${worker.whatsapp_number.replace(/\D/g,'')}`} target="_blank" rel="noreferrer" style={{color:'#0d9488'}}>{worker.whatsapp_number}</a> : '—'}
+                <div style={{fontSize:13,fontWeight:500,display:'flex',alignItems:'center',gap:6}}>
+                  {editingWhatsApp ? (
+                    <>
+                      <input type="tel" value={whatsAppDraft} onChange={e => setWhatsAppDraft(e.target.value)}
+                        placeholder="+971 50 123 4567"
+                        style={{border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',fontSize:13,width:180}} />
+                      <button style={{background:'#0d9488',color:'white',border:'none',borderRadius:4,padding:'4px 10px',fontSize:11,fontWeight:600,cursor:'pointer'}} onClick={async () => {
+                        await supabase.from('workers').update({ whatsapp_number: whatsAppDraft || null }).eq('id', id)
+                        setWorker({ ...worker, whatsapp_number: whatsAppDraft || null })
+                        setEditingWhatsApp(false)
+                        setSaveBanner(null)
+                      }}>Save</button>
+                      <button style={{background:'none',border:'none',cursor:'pointer',fontSize:14,color:'var(--muted)'}} onClick={() => setEditingWhatsApp(false)}>✕</button>
+                    </>
+                  ) : (
+                    <>
+                      {worker.whatsapp_number ? <a href={`https://wa.me/${worker.whatsapp_number.replace(/\D/g,'')}`} target="_blank" rel="noreferrer" style={{color:'#0d9488'}}>{worker.whatsapp_number}</a> : '—'}
+                      <button style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'var(--teal)',fontWeight:500}} onClick={() => { setWhatsAppDraft(worker.whatsapp_number || ''); setEditingWhatsApp(true) }}>Edit</button>
+                    </>
+                  )}
                 </div>
               </div>
               <div>
@@ -716,6 +777,94 @@ export default function WorkerDetailPage() {
                         </tr>
                       )
                     })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'payslips' && (
+          <div>
+            {payslipRows.length === 0 && !payslipLoading && (
+              <div style={{textAlign:'center',padding:20,color:'var(--muted)',fontSize:13}}>
+                {payslipLoading ? 'Loading...' : 'No payslip records found. Payslips appear here after payroll is calculated.'}
+              </div>
+            )}
+            {payslipLoading && <div style={{textAlign:'center',padding:20,color:'var(--muted)'}}>Loading payslips...</div>}
+            {payslipRows.length > 0 && (
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Month</th><th style={{textAlign:'right'}}>Gross</th><th style={{textAlign:'right'}}>Net Pay</th><th>Payment</th><th>Status</th><th style={{width:60}}>PDF</th></tr></thead>
+                  <tbody>
+                    {payslipRows.map(row => {
+                      const batch = row.payroll_batches || {}
+                      return (
+                        <tr key={row.id}>
+                          <td style={{fontWeight:600,fontSize:13}}>{batch.month_label || `${batch.month}/${batch.year}`}</td>
+                          <td style={{textAlign:'right',fontSize:12}}>AED {Number(row.gross_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                          <td style={{textAlign:'right',fontSize:13,fontWeight:700,color:'#0d9488'}}>AED {Number(row.net_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                          <td><StatusBadge label={row.payment_method||'WPS'} tone={row.payment_method==='Cash'?'danger':row.payment_method==='Non-WPS'?'warning':'success'} /></td>
+                          <td><StatusBadge label={batch.status||'—'} tone={batch.status==='locked'?'success':batch.status==='calculated'?'info':'neutral'} /></td>
+                          <td style={{textAlign:'center'}}>
+                            <button style={{background:'none',border:'none',cursor:'pointer',color:'#0d9488',fontSize:12,fontWeight:600}}
+                              disabled={pdfBusy === row.id}
+                              onClick={async () => {
+                                setPdfBusy(row.id)
+                                try {
+                                  const { downloadPayslipPDF } = await import('../../../lib/payslipPDF')
+                                  await downloadPayslipPDF(worker, row, { month_label: batch.month_label, month: `${batch.year}-${String(batch.month).padStart(2,'0')}` })
+                                } finally { setPdfBusy(null) }
+                              }}>{pdfBusy === row.id ? '...' : '📄 PDF'}</button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'timesheets' && (
+          <div>
+            {tsMonths.length === 0 && !tsLoading && (
+              <div style={{textAlign:'center',padding:20,color:'var(--muted)',fontSize:13}}>
+                No timesheet records found. Timesheets appear here after upload and payroll processing.
+              </div>
+            )}
+            {tsLoading && <div style={{textAlign:'center',padding:20,color:'var(--muted)'}}>Loading timesheets...</div>}
+            {tsMonths.length > 0 && (
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Month</th><th>Client</th><th style={{textAlign:'right'}}>Total Hours</th><th style={{textAlign:'right'}}>OT Hours</th><th style={{width:80}}>PDF</th></tr></thead>
+                  <tbody>
+                    {tsMonths.map(row => (
+                      <tr key={row.header_id}>
+                        <td style={{fontWeight:600,fontSize:13}}>{row.month_label}</td>
+                        <td style={{fontSize:12,color:'var(--muted)'}}>{row.client_name || '—'}</td>
+                        <td style={{textAlign:'right',fontSize:13,fontWeight:600}}>{Number(row.total_hours||0).toFixed(1)}h</td>
+                        <td style={{textAlign:'right',fontSize:12,color:'var(--warning)'}}>{Number(row.ot_hours||0).toFixed(1)}h</td>
+                        <td style={{textAlign:'center'}}>
+                          <button style={{background:'none',border:'none',cursor:'pointer',color:'#0d9488',fontSize:12,fontWeight:600}}
+                            disabled={pdfBusy === row.header_id}
+                            onClick={async () => {
+                              setPdfBusy(row.header_id)
+                              try {
+                                const { data: dailyLines } = await supabase
+                                  .from('timesheet_lines')
+                                  .select('work_date, total_hours, ot_hours, ot1_hours, is_public_holiday, is_friday')
+                                  .eq('header_id', row.header_id)
+                                  .eq('worker_id', id)
+                                  .order('work_date')
+                                const { downloadIndividualTimesheetPDF } = await import('../../../lib/payslipPDF')
+                                await downloadIndividualTimesheetPDF(worker, row.month_label, dailyLines || [])
+                              } finally { setPdfBusy(null) }
+                            }}>{pdfBusy === row.header_id ? '...' : '📄 PDF'}</button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
