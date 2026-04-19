@@ -794,6 +794,177 @@ New storage bucket: `company-templates`
 
 ---
 
+## 18. Onboarding Form & Offer Letter Rules [NEW — 2026-04-19]
+
+Added during PR #9 scoping after Jo flagged validation issues with
+current onboarding form and offer letter clauses. All rules below
+are absorbed into PR #9.5 scope (see §17 update at bottom of this
+section).
+
+### 18.1 Worker category rename [BREAKING]
+
+Rename the `Permanent Staff` category across the entire codebase:
+
+| Old name | New name |
+|---|---|
+| Permanent Staff | **IWS Site Staff** |
+| Office Staff | **IWS Office Staff** |
+| Contract Worker | (unchanged) |
+| Subcontract Worker | (unchanged) |
+
+This is a find-replace across:
+- `workers.category` column values (data migration)
+- `workers.category` CHECK constraint (if any)
+- All UI strings ("Permanent Staff" → "IWS Site Staff")
+- Letter templates (offer letters, cover pages, handbook)
+- Any hard-coded role-gating logic
+
+### 18.2 Onboarding form validation rules
+
+**First name:**
+- Letters only (a-z, A-Z, including Unicode letters for names like
+  "O'Brien" — allow apostrophe and hyphen)
+- Single word (no spaces)
+- Minimum 2 characters
+
+**Last name:**
+- Letters only (same Unicode rule)
+- Multiple words allowed (for compound surnames)
+- Minimum 2 characters total
+
+**Date of birth:**
+- IWS Site Staff + Contract Worker + Subcontract Worker: **minimum
+  20 years old, maximum 55 years old** (hard block)
+- IWS Office Staff: minimum 20 years old, maximum 60 years old
+- All categories: min 20 enforced universally
+
+**Monthly salary (for salaried staff only):**
+- IWS Site Staff: minimum AED 1,000, maximum AED 5,000 (hard block)
+- IWS Office Staff: minimum AED 1,000, no maximum
+- Contract + Subcontract: N/A (they use hourly_rate, not
+  monthly_salary; range 9-22 AED/hr already enforced)
+
+### 18.3 Gender field on offer + worker profile
+
+**Add column:** `workers.gender` TEXT, values `Male` or `Female`,
+NOT NULL.
+
+**IWS Site Staff enforcement — HARD BLOCK [legal risk accepted]:**
+- UI hides "Female" option for IWS Site Staff category
+- Form validation rejects female Site Staff submissions
+- Title in letters: always "Mr." for Site Staff
+
+**LEGAL RISK DOCUMENTED:** Jo explicitly chose hard-block over
+soft-warning. Under Article 14(2) of UAE Labour Law (Federal Decree
+Law 33/2021), gender-based discrimination in hiring is prohibited.
+The Law on Equal Wages and Salaries for Men and Women guarantees
+equal job opportunities. A written policy of "no female Site Staff"
+is legally exposed if ever challenged.
+
+**Operational justification on record:** Innovation's Site Staff
+accommodations are male-only single-status camps. Compliance with
+MOHRE gender-segregation requirements for worker housing means
+female Site Staff cannot currently be accommodated. This is a
+facilities constraint, not a policy of exclusion.
+
+**Recommendation for HR written policy (to document in handbook
+alongside this rule):** "Innovation currently provides single-status
+male-only site accommodation. Female candidates for on-site technical
+roles require separate accommodation arrangement, which may be
+assessed on a case-by-case basis subject to MOHRE and facility
+approval."
+
+**IWS Office Staff:** full gender selector Mr. / Ms. / Mrs. Office
+context has no accommodation constraint.
+
+### 18.4 Offer letter template changes
+
+**REMOVE:**
+- "Start Date" / "Joining Date" field — onboarding timelines vary,
+  no fixed date in offer
+- "Offer Validity Date" / "Offer Expires On" field
+- Current clause: "Unauthorized Absence: 2 days' salary deducted
+  per day of unauthorized absence" (already decided per §7.6, this
+  reinforces)
+
+**ADD:**
+- Return-window clause: "This offer must be signed and returned
+  within **7 days** of the date of offer. Offers not returned within
+  7 days are considered withdrawn."
+- Change "Food" line to "Food / Allowance" (per Jo's clarification
+  that food is a per-worker variable allowance)
+- Generic rule-acknowledgement line (no specific handbook
+  reference): "I acknowledge that I have read and agree to abide by
+  all Innovation Technologies LLC O.P.C. company rules and
+  policies, including those covering attendance, conduct, safety,
+  and disciplinary procedures as defined in the Employee Handbook
+  and UAE Labour Law (Federal Decree-Law 33/2021)."
+
+**KEEP:**
+- "Breach of Contract: Company may reclaim visa/ticket/employment
+  expenses"
+- "Safety Compliance: Strict adherence to workplace safety rules
+  mandatory"
+- "Termination for Cause: Immediate termination under Article 44 of
+  Federal Decree-Law No. 33 of 2021"
+- The §7.6 replacement language about disciplinary action
+
+**VARIANTS:**
+- Offer letter template branches on gender (Mr. / Ms. / Mrs.)
+- Offer letter template branches on category (Site Staff vs Office
+  Staff vs Contract vs Subcontract) — each already has slightly
+  different terms
+
+### 18.5 Category rename migration sequence
+
+Two-stage migration required to rename without breaking live
+queries:
+
+**Migration A:** Add new values to CHECK constraint alongside old
+values (`'Permanent Staff'` AND `'IWS Site Staff'` both valid
+temporarily).
+
+**Migration B:** Data migration — UPDATE all rows from old to new
+values. Verify zero rows remain with old values.
+
+**Migration C:** Drop old values from CHECK constraint.
+
+**Code change:** Find-replace all string references to old category
+names in one commit. The three migrations bracket the code change so
+no deployment exists where the constraint rejects the running code.
+
+### 18.6 Impact on existing 25 active workers
+
+- All 4 current "Permanent Staff" workers → migrate to
+  "IWS Site Staff"
+- All 2 current "Office Staff" workers → migrate to "IWS Office
+  Staff"
+- Gender field: backfill from existing data if available; otherwise
+  set to 'Male' default for backfilled workers (most likely
+  correct) with a flag for HR to verify individually
+- DOB + salary validation: **do NOT retroactively enforce** on
+  existing workers. New validation applies only to new onboardings
+  going forward. Existing records grandfathered.
+
+### 18.7 What PR #9.5 now covers (updated scope)
+
+PR #9.5 grew from "handbook + documents portal" to include §18:
+
+1. Handbook audit + update + v2.0 (from §17)
+2. Bilingual offer letter EN + Hindi (from §17)
+3. Documents & Policies portal (from §17)
+4. Backfill 25 workers with handbook (from §17)
+5. **Category rename Permanent Staff → IWS Site Staff** (new, §18.1)
+6. **Onboarding form validation rules** (new, §18.2)
+7. **Gender field + Site Staff hard block** (new, §18.3)
+8. **Offer letter field/clause changes** (new, §18.4)
+9. **Grandfather existing workers** (new, §18.6)
+
+Scope roughly doubles. Still pure onboarding/offer work — no payroll
+math touched. PR #9.5 becomes a 3-4 day PR instead of 1-2 days.
+
+---
+
 ## Sign-off checklist for Jo
 
 Before I write the PR #9 diagnose prompt, please confirm:
@@ -821,8 +992,11 @@ Before I write the PR #9 diagnose prompt, please confirm:
 - [ ] §16 Documents & Policies portal elevated to PR #9.5 (not PR #10)
 - [ ] §17 PR #9.5 scope (audit + handbook update + bilingual offer
       letter + backfill 25 workers + portal) is correct
+- [ ] §18 Onboarding rules (validation, DOB by category, salary
+      range, Site/Office rename, gender hard-block with legal-risk
+      note, offer letter changes) are correct
 
-If all 17 check, PR #9 diagnose prompt gets written.
+If all 18 check, PR #9 diagnose prompt gets written.
 
 If any single rule is wrong, correct it here and we update this doc
 before writing anything else. This doc is the single source of truth.
