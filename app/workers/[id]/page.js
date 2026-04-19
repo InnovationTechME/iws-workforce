@@ -17,6 +17,7 @@ import { getSignedUrl, uploadWorkerDocument } from '../../../lib/storageService'
 import { getAttendanceByWorker } from '../../../lib/attendanceService'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
 import { offerLetterHTML, warningLetterHTML, experienceLetterHTML, terminationWithNoticeHTML, terminationWithoutNoticeHTML, resignationAcceptanceHTML, policyManualHTML, TERMINATION_GROUNDS_LIST } from '../../../lib/letterTemplates'
+import { buildWaLink, starterKey } from '../../../lib/whatsappTemplates'
 
 export default function WorkerDetailPage() {
   const { id } = useParams()
@@ -249,8 +250,40 @@ export default function WorkerDetailPage() {
                     <>
                       {worker.whatsapp_number ? <a href={`https://wa.me/${worker.whatsapp_number.replace(/\D/g,'')}`} target="_blank" rel="noreferrer" style={{color:'#0d9488'}}>{worker.whatsapp_number}</a> : '—'}
                       <button style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'var(--teal)',fontWeight:500}} onClick={() => { setWhatsAppDraft(worker.whatsapp_number || ''); setEditingWhatsApp(true) }}>Edit</button>
+                      {worker.whatsapp_number && (() => {
+                        const waUrl = buildWaLink(worker.whatsapp_number, starterKey('general', worker.preferred_language || 'en'))
+                        return waUrl ? <a href={waUrl} target="_blank" rel="noreferrer" style={{background:'#25d366',color:'white',border:'none',borderRadius:4,padding:'3px 8px',fontSize:10,fontWeight:600,textDecoration:'none',display:'inline-flex',alignItems:'center',gap:3}}>WhatsApp</a> : null
+                      })()}
                     </>
                   )}
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Preferred Language</div>
+                <div style={{fontSize:13,fontWeight:500}}>
+                  <select value={worker.preferred_language || 'en'} style={{border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',fontSize:12}}
+                    onChange={async (e) => {
+                      const val = e.target.value
+                      await supabase.from('workers').update({ preferred_language: val }).eq('id', id)
+                      setWorker({ ...worker, preferred_language: val })
+                    }}>
+                    <option value="en">English</option>
+                    <option value="hi">Hindi</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Rest Day</div>
+                <div style={{fontSize:13,fontWeight:500}}>
+                  <select value={worker.rest_day || 'sunday'} style={{border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',fontSize:12}}
+                    onChange={async (e) => {
+                      const val = e.target.value
+                      await supabase.from('workers').update({ rest_day: val }).eq('id', id)
+                      setWorker({ ...worker, rest_day: val })
+                    }}>
+                    <option value="sunday">Sunday (default)</option>
+                    <option value="saturday">Saturday</option>
+                  </select>
                 </div>
               </div>
               <div>
