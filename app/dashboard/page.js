@@ -2,11 +2,28 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
-import { getDashboardMetrics, getInboxItems, getPendingApprovalsForRole, getWorkerDisplay, getAbsentToday, getAbsencePercentage, checkNonReturnStatus, getAllPayrollBatches } from '../../lib/mockStore'
 import { getAllWorkers } from '../../lib/workerService'
+import { getAllAttendance } from '../../lib/attendanceService'
+import { getLeaveRecords } from '../../lib/leaveService'
+import { getAllWarnings } from '../../lib/warningService'
+import { getTimesheetHeaders } from '../../lib/timesheetService'
+import { getPayrollBatches, getBatchesPendingApproval } from '../../lib/payrollService'
 import { supabase } from '../../lib/supabaseClient'
 import { formatDate } from '../../lib/utils'
 import { getRole } from '../../lib/mockAuth'
+
+const emptyInbox = {
+  missingDocs: [],
+  expiredDocs: [],
+  expiringDocs: [],
+  expiredCerts: [],
+  expiringCerts: [],
+  leaveRequests: [],
+  openWarnings: [],
+  pendingTimesheets: [],
+  leaveNonReturn: [],
+  pendingApprovals: [],
+}
 
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState(null)
@@ -21,11 +38,23 @@ export default function DashboardPage() {
       setLoading(true)
       setLoadError(null)
       try {
-        // Base metrics/inbox from mockStore (tables not yet migrated)
-        const baseMetrics = getDashboardMetrics()
-        const baseInbox = getInboxItems()
-        // Worker counts come from Supabase
-        const allWorkers = await getAllWorkers()
+        const [
+          allWorkers,
+          attendanceRows,
+          leaveRows,
+          warningRows,
+          timesheetHeaders,
+          payrollBatches,
+          pendingApprovals,
+        ] = await Promise.all([
+          getAllWorkers(),
+          getAllAttendance().catch(() => []),
+          getLeaveRecords().catch(() => []),
+          getAllWarnings().catch(() => []),
+          getTimesheetHeaders().catch(() => []),
+          getPayrollBatches().catch(() => []),
+          getBatchesPendingApproval(getRole()).catch(() => []),
+        ])
         const isActive = (w) => (w.status ? String(w.status).toLowerCase() === 'active' : w.active !== false)
         const active = allWorkers.filter(isActive)
         const byCategory = {
@@ -35,14 +64,13 @@ export default function DashboardPage() {
           'Office Staff':    active.filter(w => w.category === 'Office Staff').length,
         }
         const mergedMetrics = {
-          ...baseMetrics,
+          totalWorkers: allWorkers.length,
           activeWorkers: active.length,
           siteWorkforce: active.filter(w => w.category !== 'Office Staff').length,
           officeStaff:   active.filter(w => w.category === 'Office Staff').length,
           subcontractors: active.filter(w => w.category === 'Subcontract Worker' || w.category === 'Subcontractor').length,
           byCategory,
         }
-        // Real document & certification counts from Supabase
         const todayStr = new Date().toISOString().split('T')[0]
         const in30Str = new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0]
 
@@ -53,16 +81,38 @@ export default function DashboardPage() {
           supabase.from('certifications').select('*, workers(worker_number, full_name)').lt('expiry_date', todayStr),
           supabase.from('certifications').select('*, workers(worker_number, full_name)').gte('expiry_date', todayStr).lte('expiry_date', in30Str),
         ])
+        const queryError = [missingDocsRes, expiredDocsRes, expiringDocsRes, expiredCertsRes, expiringCertsRes].find(res => res.error)?.error
+        if (queryError) throw queryError
         const normaliseDoc = (d) => ({ ...d, document_type: d.doc_type })
         const normaliseCert = (c) => ({ ...c, certification_type: c.cert_type })
+        const absentToday = attendanceRows.filter(row => row.date === todayStr && ['absent_no_cert', 'unauthorised_absence', 'absent'].includes(row.reason || row.status))
+        const openWarnings = warningRows.filter(row => !['closed', 'resolved'].includes(String(row.status || '').toLowerCase()))
+        const leaveRequests = leaveRows.filter(row => ['pending', 'submitted'].includes(String(row.status || '').toLowerCase()))
+        const leaveNonReturn = leaveRows.filter(row => {
+          const status = String(row.status || '').toLowerCase()
+          const expected = row.expected_return_date || row.end_date
+          return expected && expected < todayStr && ['approved', 'on_leave', 'departed'].includes(status)
+        })
+        const pendingTimesheets = timesheetHeaders.filter(row => {
+          const statuses = [row.hr_check_status, row.operations_check_status, row.final_approval_status, row.status]
+          return statuses.some(status => String(status || '').toLowerCase() === 'pending')
+        })
         const realInbox = {
-          ...baseInbox,
+          ...emptyInbox,
           missingDocs: (missingDocsRes.data || []).map(normaliseDoc),
           expiredDocs: (expiredDocsRes.data || []).map(normaliseDoc),
           expiringDocs: (expiringDocsRes.data || []).map(normaliseDoc),
           expiredCerts: (expiredCertsRes.data || []).map(normaliseCert),
           expiringCerts: (expiringCertsRes.data || []).map(normaliseCert),
+          leaveRequests,
+          openWarnings,
+          pendingTimesheets,
+          leaveNonReturn,
+          pendingApprovals,
         }
+        mergedMetrics.absentToday = absentToday.length
+        mergedMetrics.absencePercentage = active.length ? Math.round((absentToday.length / active.length) * 100) : 0
+        mergedMetrics.activePayrollBatch = payrollBatches.find(batch => batch.status !== 'locked') || null
 
         if (!cancelled) {
           setMetrics(mergedMetrics)
@@ -77,14 +127,41 @@ export default function DashboardPage() {
     return () => { cancelled = true }
   }, [])
 
-  if (loading || !metrics || !inbox) return null
+  if (loading) {
+    return <AppShell pageTitle="Dashboard"><div style={{padding:40,textAlign:'center',color:'var(--muted)'}}>Loading dashboard...</div></AppShell>
+  }
+  if (loadError) {
+    return (
+      <AppShell pageTitle="Dashboard">
+        <div className="panel" style={{maxWidth:680,margin:'40px auto',borderColor:'#fecaca',background:'#fef2f2'}}>
+          <h2 style={{fontSize:18,fontWeight:700,color:'#991b1b',marginBottom:8}}>Dashboard could not load</h2>
+          <p style={{fontSize:13,color:'#7f1d1d',lineHeight:1.6,margin:0}}>{loadError}</p>
+        </div>
+      </AppShell>
+    )
+  }
+  if (!metrics || !inbox) {
+    return <AppShell pageTitle="Dashboard"><div style={{padding:40,textAlign:'center',color:'var(--muted)'}}>No dashboard data available.</div></AppShell>
+  }
 
   const now = new Date()
   const dayName = now.toLocaleDateString('en-GB',{weekday:'long'})
   const dateStr = now.toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})
+  const getAbsentToday = () => Array.from({ length: metrics.absentToday || 0 })
+  const getAbsencePercentage = () => metrics.absencePercentage || 0
+  const checkNonReturnStatus = () => inbox.leaveNonReturn || []
+  const getAllPayrollBatches = () => metrics.activePayrollBatch ? [metrics.activePayrollBatch] : []
+  const getPendingApprovalsForRole = () => ({
+    timesheets: [],
+    payroll: inbox.pendingApprovals || [],
+    warnings: [],
+    terminations: [],
+    leave: [],
+  })
+  const getWorkerDisplay = () => ({ name_primary: 'Unknown', id_secondary: '—' })
 
   const alertCards = [
-    { key:'absent', label:'Absent Today', value: inbox.leaveRequests?.filter(l=>l.status==='pending').length || 0, sub:'pending approval', tone:'danger', icon:'🚨', href:'/attendance', priority:1 },
+    { key:'absent', label:'Absent Today', value: metrics.absentToday || 0, sub:`${metrics.absencePercentage || 0}% absence rate`, tone:(metrics.absentToday || 0) > 0 ? 'danger' : 'info', icon:'🚨', href:'/attendance', priority:1 },
     { key:'expDocs', label:'Expired Documents', value: inbox.expiredDocs?.length||0, sub:'action required', tone:'danger', icon:'📄', href:'/documents', priority:2 },
     { key:'expCerts', label:'Expired Certifications', value: inbox.expiredCerts?.length||0, sub:'action required', tone:'danger', icon:'🏅', href:'/certifications', priority:3 },
     { key:'warnings', label:'Open Warnings', value: inbox.openWarnings?.length||0, sub:'unresolved', tone:'danger', icon:'⚠️', href:'/warnings', priority:4 },
@@ -92,7 +169,7 @@ export default function DashboardPage() {
     { key:'expiringDocs', label:'Expiring Soon', value: inbox.expiringDocs?.length||0, sub:'within 30 days', tone:'warning', icon:'⏰', href:'/documents', priority:6 },
     { key:'expiringCerts', label:'Certs Expiring', value: inbox.expiringCerts?.length||0, sub:'within 30 days', tone:'warning', icon:'🔔', href:'/certifications', priority:7 },
     { key:'timesheets', label:'Pending Timesheets', value: inbox.pendingTimesheets?.length||0, sub:'awaiting approval', tone:'info', icon:'🕐', href:'/timesheets', priority:8 },
-    { key:'leaveNonReturn', label:'Leave Non-Return', value: checkNonReturnStatus().length, sub: checkNonReturnStatus().length > 0 ? checkNonReturnStatus()[0].worker_name + ' overdue' : 'all returned', tone: checkNonReturnStatus().length > 0 ? 'danger' : 'info', icon:'✈️', href:'/leave', priority: checkNonReturnStatus().length > 0 ? 0 : 9 },
+    { key:'leaveNonReturn', label:'Leave Non-Return', value: inbox.leaveNonReturn?.length || 0, sub: inbox.leaveNonReturn?.length > 0 ? `${inbox.leaveNonReturn[0].worker_name || 'Worker'} overdue` : 'all returned', tone: inbox.leaveNonReturn?.length > 0 ? 'danger' : 'info', icon:'✈️', href:'/leave', priority: inbox.leaveNonReturn?.length > 0 ? 0 : 9 },
   ].sort((a,b) => a.priority - b.priority)
 
   const toneStyles = {
