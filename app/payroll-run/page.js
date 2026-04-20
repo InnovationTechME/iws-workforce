@@ -828,15 +828,20 @@ export default function PayrollRunPage() {
     const batchLabel = selectedBatch?.month_label || `${MONTH_NAMES[(selectedMonth||1)-1]} ${selectedYear}`
 
     const generateWPSExcel = async () => {
-      const XLSX = (await import('xlsx'))
-      const wpsData = payrollLines.filter(l=>l.payment_method==='WPS'||!l.payment_method).map(l=>{const w=l.worker||{};return {'IT Employee ID':l.worker_number||w.worker_number,'Full Name':l.worker_name||w.full_name,'Category':w.category,'Pay Type':l.payroll_type==='hourly'?'Hourly Rate':'Monthly Salary','Basic / Rate':l.payroll_type==='hourly'?l.rate_used:l.basic_salary,'Total Hours':l.total_hours||'','Allowances':l.allowances_total,'OT1 Pay':l.ot1_pay,'OT2 Pay':l.ot2_pay,'Gross Pay':l.gross_pay,'Deductions':l.deductions_total,'Net Pay':l.net_pay,'Payment Method':'WPS — C3 Card (Endered)'}})
-      const nonWpsData = payrollLines.filter(l=>l.payment_method==='Non-WPS'||l.payment_method==='Cash').map(l=>{const w=l.worker||{};return {'IT Employee ID':l.worker_number||w.worker_number,'Full Name':l.worker_name||w.full_name,'Gross Pay':l.gross_pay,'Deductions':l.deductions_total,'Net Pay':l.net_pay,'Payment':l.payment_method}})
-      const summaryData = [{'Section':'GRAND TOTAL','Amount':totals.totalNet,'WPS/Non-WPS':`WPS: AED ${totals.wpsTotal.toLocaleString()} | Non-WPS: AED ${totals.nonWpsTotal.toLocaleString()} | Cash: AED ${totals.cashTotal.toLocaleString()}`,'Workers':totals.workerCount}]
-      const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(wpsData),'WPS Workers')
-      XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(nonWpsData.length>0?nonWpsData:[{Note:'No Non-WPS workers'}]),'Non-WPS')
-      XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(summaryData),'Summary')
-      XLSX.writeFile(wb,`Innovation_Payroll_${batchLabel.replace(/\s+/g,'_')}.xlsx`)
+      try {
+        const XLSX = (await import('xlsx'))
+        const wpsData = payrollLines.filter(l=>l.payment_method==='WPS'||!l.payment_method).map(l=>{const w=l.worker||{};return {'IT Employee ID':l.worker_number||w.worker_number,'Full Name':l.worker_name||w.full_name,'Category':w.category,'Pay Type':l.payroll_type==='hourly'?'Hourly Rate':'Monthly Salary','Basic / Rate':l.payroll_type==='hourly'?l.rate_used:l.basic_salary,'Total Hours':l.total_hours||'','Allowances':l.allowances_total,'OT1 Pay':l.ot1_pay,'OT2 Pay':l.ot2_pay,'Gross Pay':l.gross_pay,'Deductions':l.deductions_total,'Net Pay':l.net_pay,'Payment Method':'WPS — C3 Card (Endered)'}})
+        const nonWpsData = payrollLines.filter(l=>l.payment_method==='Non-WPS'||l.payment_method==='Cash').map(l=>{const w=l.worker||{};return {'IT Employee ID':l.worker_number||w.worker_number,'Full Name':l.worker_name||w.full_name,'Gross Pay':l.gross_pay,'Deductions':l.deductions_total,'Net Pay':l.net_pay,'Payment':l.payment_method}})
+        const summaryData = [{'Section':'GRAND TOTAL','Amount':totals.totalNet,'WPS/Non-WPS':`WPS: AED ${totals.wpsTotal.toLocaleString()} | Non-WPS: AED ${totals.nonWpsTotal.toLocaleString()} | Cash: AED ${totals.cashTotal.toLocaleString()}`,'Workers':totals.workerCount}]
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(wpsData),'WPS Workers')
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(nonWpsData.length>0?nonWpsData:[{Note:'No Non-WPS workers'}]),'Non-WPS')
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(summaryData),'Summary')
+        XLSX.writeFile(wb,`Innovation_Payroll_${batchLabel.replace(/\s+/g,'_')}.xlsx`)
+      } catch (err) {
+        console.error('[WPS Excel] failed', err)
+        alert(`WPS Excel download failed:\n\n${err?.message || err}\n\nCheck browser console (F12) for full stack trace.`)
+      }
     }
 
     return (<div>
@@ -872,6 +877,9 @@ export default function PayrollRunPage() {
             try {
               const { downloadBatchPayslipsZip } = await import('../../lib/payslipPDF')
               await downloadBatchPayslipsZip(selectedBatch, payrollLines)
+            } catch (err) {
+              console.error('[Batch ZIP] failed', err)
+              alert(`Batch payslip ZIP failed:\n\n${err?.message || err}\n\nCheck browser console (F12) for full stack trace.`)
             } finally { setZipping(false) }
           }}>{zipping ? 'Generating...' : 'Download ZIP'}</button>
         </div>
@@ -907,6 +915,9 @@ export default function PayrollRunPage() {
                       try {
                         const { downloadPayslipPDF } = await import('../../lib/payslipPDF')
                         await downloadPayslipPDF(w, line, selectedBatch)
+                      } catch (err) {
+                        console.error('[Payslip PDF] failed for', w.worker_number, err)
+                        alert(`Payslip PDF failed for ${w.full_name || w.worker_number}:\n\n${err?.message || err}\n\nCheck browser console (F12) for full stack trace.`)
                       } finally { setPdfWorker(null) }
                     }}>{pdfWorker === line.id ? '...' : '📄 PDF'}</button>
                   {w.whatsapp_number && (() => {
