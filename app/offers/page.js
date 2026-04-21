@@ -1,12 +1,13 @@
 'use client'
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, Suspense, useRef } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { checkBlacklist, makeId, generateRefNumber, addLetter } from '../../lib/mockStore'
+import { generateRefNumber } from '../../lib/mockStore'
+import { checkBlacklist } from '../../lib/blacklistService'
 import { getOffers, addOffer, updateOffer, acceptOffer, rejectOffer } from '../../lib/offerService'
 import { formatCurrency, formatDate, getStatusTone, calculateOTRates, passportExpiryGap, looksLikeCompanyName } from '../../lib/utils'
 import { NATIONALITIES, POSITIONS } from '../../data/constants'
@@ -22,6 +23,7 @@ function OffersPage() {
   const [filter, setFilter] = useState('all')
   const [showDrawer, setShowDrawer] = useState(false)
   const [blacklistWarning, setBlacklistWarning] = useState(null)
+  const [blacklistError, setBlacklistError] = useState(null)
   const [formErrors, setFormErrors] = useState([])
   const [formError, setFormError] = useState(null)
   const [successMsg, setSuccessMsg] = useState(null)
@@ -34,7 +36,7 @@ function OffersPage() {
   }
   const [form, setForm] = useState(emptyForm())
 
-  const openDrawer = () => { setForm(emptyForm()); setFormError(null); setFormErrors([]); setBlacklistWarning(null); setShowDrawer(true) }
+  const openDrawer = () => { setForm(emptyForm()); setFormError(null); setFormErrors([]); setBlacklistWarning(null); setBlacklistError(null); setShowDrawer(true) }
   const handleCategoryChange = (category) => {
     setForm(prev => {
       const next = { ...prev, category }
@@ -48,6 +50,7 @@ function OffersPage() {
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
+  const blacklistReqRef = useRef(0)
   const searchParams = useSearchParams()
   const router = useRouter()
 
@@ -99,12 +102,22 @@ function OffersPage() {
   const totalPackage = basicAmt + (Number(form.housing_allowance)||0) + (Number(form.transport_allowance)||0) + (Number(form.food_allowance)||0) + (Number(form.other_allowance)||0)
   const otRates = isPermanent && basicAmt ? calculateOTRates(basicAmt, 'monthly') : null
 
-  const handlePassportCheck = (passport) => {
-    setForm({...form, passport_number: passport})
-    if (passport.length > 5) {
-      setBlacklistWarning(checkBlacklist(passport))
-    } else {
+  const handlePassportCheck = async (passport) => {
+    setForm(prev => ({ ...prev, passport_number: passport }))
+    setBlacklistError(null)
+    if (passport.length <= 5) {
       setBlacklistWarning(null)
+      return
+    }
+    const reqId = ++blacklistReqRef.current
+    try {
+      const hit = await checkBlacklist(passport)
+      if (reqId === blacklistReqRef.current) setBlacklistWarning(hit)
+    } catch (_err) {
+      if (reqId === blacklistReqRef.current) {
+        setBlacklistWarning(null)
+        setBlacklistError('Blacklist check is temporarily unavailable')
+      }
     }
   }
 
@@ -302,6 +315,7 @@ function OffersPage() {
           <div style={{display:'flex',flexDirection:'column',gap:14}}>
             {formErrors.length > 0 && <div style={{background:'#fef2f2',border:'1px solid var(--danger)',borderRadius:6,padding:'10px 12px',display:'flex',flexDirection:'column',gap:4}}>{formErrors.map(e => <div key={e} style={{color:'var(--danger)',fontSize:12}}>⚠ {e}</div>)}</div>}
             {blacklistWarning && <div className="notice danger"><strong>Blacklist match:</strong> {blacklistWarning.full_name} — {blacklistWarning.reason}</div>}
+            {blacklistError && <div className="notice warning"><strong>Warning:</strong> {blacklistError}</div>}
             <div className="form-grid">
               <div className="form-field"><label className="form-label">First name *</label><input className="form-input" value={form.first_name} onChange={e => setForm({...form, first_name:e.target.value})} /></div>
               <div className="form-field"><label className="form-label">Last name *</label><input className="form-input" value={form.last_name} onChange={e => setForm({...form, last_name:e.target.value})} /></div>
