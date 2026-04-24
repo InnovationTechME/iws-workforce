@@ -229,12 +229,12 @@ export default function PayrollPage() {
                 <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span>Hourly Rate</span><span>AED {selected.rate_used || selected.base_hourly_rate}/hr</span></div>
                 <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span>Hours Worked</span><span>{selected.total_hours}h</span></div>
                 <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span>Standard Pay</span><span>{formatCurrency(selected.basic_salary)}</span></div>
-                {Number(selected.ot2_pay||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'var(--danger)'}}><span>Holiday Premium ({selected.ot2_hours}h)</span><span>{formatCurrency(selected.ot2_pay)}</span></div>}
+                {Number(selected.ot2_pay||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'var(--danger)'}}><span>Rest/Holiday Premium ({selected.ot2_hours}h)</span><span>{formatCurrency(selected.ot2_pay)}</span></div>}
               </>) : (<>
                 <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span>Basic Salary</span><span style={{fontWeight:600}}>{formatCurrency(selected.basic_salary)}</span></div>
                 {Number(selected.allowances_total||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'var(--success)'}}><span>Allowances</span><span>{formatCurrency(selected.allowances_total)}</span></div>}
                 {Number(selected.ot1_pay||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'var(--warning)'}}><span>OT Weekday ({selected.ot1_hours}h)</span><span>{formatCurrency(selected.ot1_pay)}</span></div>}
-                {Number(selected.ot2_pay||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'var(--danger)'}}><span>OT Fri/Holiday ({selected.ot2_hours}h)</span><span>{formatCurrency(selected.ot2_pay)}</span></div>}
+                {Number(selected.ot2_pay||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'var(--danger)'}}><span>OT Rest/Holiday ({selected.ot2_hours}h)</span><span>{formatCurrency(selected.ot2_pay)}</span></div>}
               </>)}
               <div style={{display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:700,borderTop:'1px solid var(--border)',paddingTop:8,marginTop:8}}><span>Gross</span><span style={{color:'var(--teal)'}}>{formatCurrency(selected.gross_pay)}</span></div>
 

@@ -14,6 +14,7 @@ import { getVisibleWorkers } from '../../lib/workerService'
 import { getPublicHolidaysByYear } from '../../lib/publicHolidayService'
 import { getRole } from '../../lib/mockAuth'
 import { buildWaLink, starterKey, STARTERS } from '../../lib/whatsappTemplates'
+import { classifyDay } from '../../lib/dateUtils'
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
@@ -331,7 +332,7 @@ export default function PayrollRunPage() {
       const dateObj = new Date(yearNum, monthIndex, day)
       const dayOfWeek = dateObj.getDay()
       const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
-      return {day,dateStr,dayOfWeek,dayName:dayNames[dayOfWeek],isFriday:dayOfWeek===5,isSunday:dayOfWeek===0,isHoliday:isHoliday(dateStr),holidayName:isHoliday(dateStr)?getHolidayName(dateStr):null}
+      return {day,dateStr,dayOfWeek,dayName:dayNames[dayOfWeek],isDefaultRestDay:dayOfWeek===0,isHoliday:isHoliday(dateStr),holidayName:isHoliday(dateStr)?getHolidayName(dateStr):null}
     })
 
     const filteredWorkers = selectedWorkerFilter === 'all'
@@ -354,7 +355,7 @@ export default function PayrollRunPage() {
     return (<div>
       <InstructionBanner step={1} title="Timesheet Review" roleLabel="HR Admin"
         description="Review all worker hours for this pay period. Verify the hours are correct before generating payroll."
-        howTo={['Each worker row shows their daily hours for the month','Friday columns are highlighted amber — these attract 1.50× premium for salaried staff','Red column headers indicate UAE public holidays','Use the Print button at any time to print the full timesheet','Select a single worker from the dropdown to review individually','When satisfied, click Confirm & Generate Payroll']} />
+        howTo={['Each worker row shows their daily hours for the month','Sunday/rest-day columns are highlighted amber and use rest-day premium rules','Red column headers indicate UAE public holidays','Use the Print button at any time to print the full timesheet','Select a single worker from the dropdown to review individually','When satisfied, click Confirm & Generate Payroll']} />
 
       {/* Filters */}
       <div style={{display:'flex',gap:12,alignItems:'center',marginBottom:16,flexWrap:'wrap'}}>
@@ -383,19 +384,19 @@ export default function PayrollRunPage() {
 
       {/* Grid */}
       <div id="timesheet-print-area" style={{overflowX:'auto',border:'1px solid #e2e8f0',borderRadius:8,background:'white',marginBottom:20}}>
-        <table style={{borderCollapse:'collapse',minWidth:'100%',fontSize:11}}>
+        <table style={{borderCollapse:'collapse',minWidth:'100%',fontSize:10,tableLayout:'fixed'}}>
           <thead>
             <tr style={{background:'#f8fafc'}}>
-              <th style={{position:'sticky',left:0,zIndex:3,background:'#f8fafc',width:160,padding:'8px 10px',textAlign:'left',borderRight:'2px solid #e2e8f0',borderBottom:'2px solid #e2e8f0',fontSize:10,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:0.5}}>Worker</th>
-              <th style={{position:'sticky',left:160,zIndex:3,background:'#f8fafc',width:100,padding:'8px 8px',textAlign:'left',borderRight:'1px solid #e2e8f0',borderBottom:'2px solid #e2e8f0',fontSize:10,fontWeight:700,color:'#64748b',textTransform:'uppercase'}}>Trade</th>
-              <th style={{position:'sticky',left:260,zIndex:3,background:'#f8fafc',width:50,padding:'8px 6px',textAlign:'center',borderRight:'2px solid #cbd5e1',borderBottom:'2px solid #e2e8f0',fontSize:10,fontWeight:700,color:'#64748b'}}>Rate</th>
+              <th style={{position:'sticky',left:0,zIndex:3,background:'#f8fafc',width:132,padding:'6px 8px',textAlign:'left',borderRight:'2px solid #e2e8f0',borderBottom:'2px solid #e2e8f0',fontSize:9,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:0.5}}>Worker</th>
+              <th style={{position:'sticky',left:132,zIndex:3,background:'#f8fafc',width:82,padding:'6px 6px',textAlign:'left',borderRight:'1px solid #e2e8f0',borderBottom:'2px solid #e2e8f0',fontSize:9,fontWeight:700,color:'#64748b',textTransform:'uppercase'}}>Trade</th>
+              <th style={{position:'sticky',left:214,zIndex:3,background:'#f8fafc',width:48,padding:'6px 4px',textAlign:'center',borderRight:'2px solid #cbd5e1',borderBottom:'2px solid #e2e8f0',fontSize:9,fontWeight:700,color:'#64748b'}}>Rate</th>
               {dayMeta.map(dm => (
-                <th key={dm.day} style={{width:38,minWidth:38,padding:'4px 2px',textAlign:'center',fontSize:9,fontWeight:700,borderBottom:'2px solid #e2e8f0',borderRight:'1px solid #f1f5f9',background:dm.isHoliday?'#fee2e2':dm.isFriday?'#fef3c7':'#f8fafc',color:dm.isHoliday?'#dc2626':dm.isFriday?'#d97706':'#64748b'}}>
-                  <div>{dm.day}</div><div style={{fontSize:8,fontWeight:400}}>{dm.dayName}</div>{dm.isHoliday&&<div style={{fontSize:7}}>PH</div>}
+                <th key={dm.day} style={{width:26,minWidth:26,padding:'3px 1px',textAlign:'center',fontSize:8,fontWeight:700,borderBottom:'2px solid #e2e8f0',borderRight:'1px solid #f1f5f9',background:dm.isHoliday?'#fee2e2':dm.isDefaultRestDay?'#fef3c7':'#f8fafc',color:dm.isHoliday?'#dc2626':dm.isDefaultRestDay?'#d97706':'#64748b'}}>
+                  <div>{dm.day}</div><div style={{fontSize:7,fontWeight:400}}>{dm.dayName}</div>{dm.isHoliday&&<div style={{fontSize:7}}>PH</div>}
                 </th>
               ))}
               {[['Total','#0f172a'],['Normal','#64748b'],['OT','#d97706'],['Gross','#0d9488']].map(([label,color]) => (
-                <th key={label} style={{width:58,minWidth:58,padding:'8px 6px',textAlign:'right',fontSize:10,fontWeight:700,borderBottom:'2px solid #e2e8f0',borderLeft:label==='Total'?'2px solid #cbd5e1':'1px solid #f1f5f9',color,background:'#f8fafc'}}>{label}</th>
+                <th key={label} style={{width:50,minWidth:50,padding:'6px 4px',textAlign:'right',fontSize:9,fontWeight:700,borderBottom:'2px solid #e2e8f0',borderLeft:label==='Total'?'2px solid #cbd5e1':'1px solid #f1f5f9',color,background:'#f8fafc'}}>{label}</th>
               ))}
             </tr>
           </thead>
@@ -410,17 +411,19 @@ export default function PayrollRunPage() {
 
               return (
                 <tr key={worker.id} style={{background:workerIdx%2===0?'white':'#fafafa',borderTop:workerIdx>0?'1px solid #f1f5f9':'none'}}>
-                  <td style={{position:'sticky',left:0,zIndex:2,background:workerIdx%2===0?'white':'#fafafa',padding:'8px 10px',borderRight:'2px solid #e2e8f0'}}>
-                    <div style={{fontWeight:600,fontSize:12,color:'#0f172a'}}>{worker.full_name}</div>
-                    <div style={{fontSize:10,color:'#94a3b8',fontFamily:'monospace'}}>{worker.worker_number}</div>
+                  <td style={{position:'sticky',left:0,zIndex:2,background:workerIdx%2===0?'white':'#fafafa',padding:'6px 8px',borderRight:'2px solid #e2e8f0'}}>
+                    <div style={{fontWeight:600,fontSize:11,color:'#0f172a',lineHeight:1.2}}>{worker.full_name}</div>
+                    <div style={{fontSize:9,color:'#94a3b8',fontFamily:'monospace'}}>{worker.worker_number}</div>
                   </td>
-                  <td style={{position:'sticky',left:160,zIndex:2,background:workerIdx%2===0?'white':'#fafafa',padding:'8px',borderRight:'1px solid #e2e8f0',fontSize:11,color:'#334155'}}>{worker.trade_role}</td>
-                  <td style={{position:'sticky',left:260,zIndex:2,background:workerIdx%2===0?'white':'#fafafa',padding:'4px 6px',textAlign:'center',borderRight:'2px solid #cbd5e1',fontSize:10,color:'#64748b'}}>
+                  <td style={{position:'sticky',left:132,zIndex:2,background:workerIdx%2===0?'white':'#fafafa',padding:'6px',borderRight:'1px solid #e2e8f0',fontSize:10,color:'#334155'}}>{worker.trade_role}</td>
+                  <td style={{position:'sticky',left:214,zIndex:2,background:workerIdx%2===0?'white':'#fafafa',padding:'4px',textAlign:'center',borderRight:'2px solid #cbd5e1',fontSize:9,color:'#64748b'}}>
                     {isFlat ? `${worker.hourly_rate}/h` : 'Salary'}
                   </td>
                   {dayMeta.map(dm => {
                     const hrs = getIWSHours(worker.id,dm.dateStr)
-                    return (<td key={dm.day} style={{padding:'4px 2px',textAlign:'center',fontSize:10,borderRight:'1px solid #f9fafb',background:dm.isHoliday&&hrs>0?'#fee2e2':dm.isFriday&&hrs>0?'#fef3c7':hrs>8?'#fffbeb':'transparent',fontWeight:hrs>8?700:400,color:hrs>8?'#d97706':hrs===0||hrs===null?'#cbd5e1':'#0f172a'}}>{hrs===null||hrs===0?<span style={{color:'#e2e8f0'}}>—</span>:hrs}</td>)
+                    const dayType = classifyDay(dm.dateStr, worker.rest_day || 'sunday', holidays)
+                    const isRestDay = dayType === 'rest_day'
+                    return (<td key={dm.day} style={{padding:'3px 1px',textAlign:'center',fontSize:9,borderRight:'1px solid #f9fafb',background:dm.isHoliday&&hrs>0?'#fee2e2':isRestDay&&hrs>0?'#fef3c7':hrs>8?'#fffbeb':'transparent',fontWeight:hrs>8?700:400,color:hrs>8?'#d97706':hrs===0||hrs===null?'#cbd5e1':'#0f172a'}}>{hrs===null||hrs===0?<span style={{color:'#e2e8f0'}}>—</span>:hrs}</td>)
                   })}
                   <td style={{textAlign:'right',padding:'8px 6px',fontWeight:700,fontSize:11,borderLeft:'2px solid #cbd5e1'}}>{totalHrs||'—'}h</td>
                   <td style={{textAlign:'right',padding:'8px 6px',fontSize:11,color:'#64748b'}}>{normalHrs||'—'}h</td>
@@ -432,7 +435,7 @@ export default function PayrollRunPage() {
             {/* Totals */}
             <tr style={{background:'#0f172a',color:'white',position:'sticky',bottom:0}}>
               <td colSpan={2} style={{position:'sticky',left:0,zIndex:3,background:'#0f172a',padding:'10px 10px',fontWeight:700,fontSize:12,borderRight:'2px solid #1e293b'}}>TOTALS — {filteredWorkers.length} workers</td>
-              <td style={{position:'sticky',left:260,zIndex:3,background:'#0f172a',borderRight:'2px solid #334155',padding:'10px 6px'}} />
+              <td style={{position:'sticky',left:214,zIndex:3,background:'#0f172a',borderRight:'2px solid #334155',padding:'8px 4px'}} />
               {dayMeta.map(dm => {
                 const dayTotal = filteredWorkers.reduce((sum,w) => sum+Number(getIWSHours(w.id,dm.dateStr)||0),0)
                 return <td key={dm.day} style={{padding:'6px 2px',textAlign:'center',fontSize:10,fontWeight:600,color:dayTotal>0?'#5eead4':'#334155',borderRight:'1px solid #1e293b'}}>{dayTotal>0?dayTotal:''}</td>
@@ -534,12 +537,12 @@ export default function PayrollRunPage() {
                         <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span>Hourly Rate (snapshot)</span><span>AED {line.rate_used || line.base_hourly_rate}/hr</span></div>
                         <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span>Hours Worked</span><span>{line.total_hours}h</span></div>
                         <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span>Standard Pay</span><span>AED {Number(line.basic_salary||0).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
-                        {Number(line.ot2_hours||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'#dc2626'}}><span>Holiday Premium ({line.ot2_hours}h × ×0.50)</span><span>AED {Number(line.ot2_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
+                        {Number(line.ot2_hours||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'#dc2626'}}><span>Rest/Holiday Premium ({line.ot2_hours}h × ×0.50)</span><span>AED {Number(line.ot2_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
                       </>) : (<>
                         <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span>Basic Salary</span><span style={{fontWeight:600}}>AED {Number(line.basic_salary||0).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
                         {Number(line.allowances_total||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'#16a34a'}}><span>Allowances (H:{line.housing_allowance} T:{line.transport_allowance} F:{line.food_allowance})</span><span>AED {Number(line.allowances_total).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
                         {Number(line.ot1_hours||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'#d97706'}}><span>OT Weekday ({line.ot1_hours}h × {Number(line.base_hourly_rate||0).toFixed(2)} × 1.25)</span><span>AED {Number(line.ot1_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
-                        {Number(line.ot2_hours||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'#dc2626'}}><span>OT Fri/Holiday ({line.ot2_hours}h × {Number(line.base_hourly_rate||0).toFixed(2)} × 1.50)</span><span>AED {Number(line.ot2_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
+                        {Number(line.ot2_hours||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'#dc2626'}}><span>OT Rest/Holiday ({line.ot2_hours}h × {Number(line.base_hourly_rate||0).toFixed(2)} × 1.50)</span><span>AED {Number(line.ot2_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
                       </>)}
                       <div style={{display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:700,borderTop:'1px solid #e2e8f0',paddingTop:8,marginTop:8}}><span>Gross Earnings</span><span style={{color:'#0d9488'}}>AED {Number(line.gross_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
                     </div>
@@ -627,7 +630,7 @@ export default function PayrollRunPage() {
     const dayMeta = Array.from({length:daysInMonth},(_,i) => {
       const day=i+1; const dateStr=`${yearNum}-${String(monthIndex+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
       const dateObj=new Date(yearNum,monthIndex,day); const dow=dateObj.getDay()
-      return {day,dateStr,isFriday:dow===5,isHoliday:isHoliday(dateStr)}
+      return {day,dateStr,isDefaultRestDay:dow===0,isHoliday:isHoliday(dateStr)}
     })
     const getIWSHours = (wId,dateStr) => { const l=allLines.find(l=>l.worker_id===wId&&l.work_date===dateStr); return l?Number(l.total_hours||0):null }
 
@@ -648,7 +651,7 @@ export default function PayrollRunPage() {
             <thead><tr style={{background:'#f8fafc'}}>
               <th style={{position:'sticky',left:0,zIndex:2,background:'#f8fafc',padding:'6px 10px',textAlign:'left',borderRight:'2px solid #e2e8f0',borderBottom:'2px solid #e2e8f0',fontSize:10,minWidth:160}}>Worker</th>
               <th style={{position:'sticky',left:160,zIndex:2,background:'#f8fafc',padding:'6px 8px',textAlign:'left',borderRight:'2px solid #e2e8f0',borderBottom:'2px solid #e2e8f0',fontSize:10,minWidth:80}}>Trade</th>
-              {dayMeta.map(dm => <th key={dm.day} style={{padding:'4px 2px',textAlign:'center',minWidth:32,fontSize:9,borderBottom:'2px solid #e2e8f0',background:dm.isHoliday?'#fee2e2':dm.isFriday?'#fef3c7':'#f8fafc',color:dm.isHoliday?'#dc2626':dm.isFriday?'#d97706':'#64748b'}}>{dm.day}</th>)}
+              {dayMeta.map(dm => <th key={dm.day} style={{padding:'4px 2px',textAlign:'center',minWidth:28,fontSize:9,borderBottom:'2px solid #e2e8f0',background:dm.isHoliday?'#fee2e2':dm.isDefaultRestDay?'#fef3c7':'#f8fafc',color:dm.isHoliday?'#dc2626':dm.isDefaultRestDay?'#d97706':'#64748b'}}>{dm.day}</th>)}
               <th style={{padding:'6px',textAlign:'right',borderLeft:'2px solid #e2e8f0',borderBottom:'2px solid #e2e8f0',fontSize:10,fontWeight:700,minWidth:50}}>Total</th>
               <th style={{padding:'6px',textAlign:'center',borderBottom:'2px solid #e2e8f0',fontSize:10,minWidth:60}}>Flag</th>
             </tr></thead>
@@ -665,7 +668,7 @@ export default function PayrollRunPage() {
                       {isFlagged&&<div style={{fontSize:9,color:'#dc2626',fontWeight:600,marginTop:2}}>⚠ {flaggedWorkers[w.id]}</div>}
                     </td>
                     <td style={{position:'sticky',left:160,zIndex:1,background:isFlagged?'#fef2f2':i%2===0?'white':'#fafafa',padding:'6px 8px',borderRight:'2px solid #e2e8f0',fontSize:10}}>{w.trade_role}</td>
-                    {dayMeta.map(dm => { const hrs=getIWSHours(w.id,dm.dateStr); return <td key={dm.day} style={{padding:'3px 1px',textAlign:'center',fontSize:10,color:hrs>0?(hrs>8?'#d97706':'#0f172a'):'#e2e8f0',fontWeight:hrs>8?700:400,background:dm.isHoliday&&hrs>0?'#fef2f2':dm.isFriday&&hrs>0?'#fffbeb':'transparent'}}>{hrs>0?hrs:'—'}</td>})}
+                    {dayMeta.map(dm => { const hrs=getIWSHours(w.id,dm.dateStr); const isRestDay=classifyDay(dm.dateStr,w.rest_day||'sunday',holidays)==='rest_day'; return <td key={dm.day} style={{padding:'3px 1px',textAlign:'center',fontSize:10,color:hrs>0?(hrs>8?'#d97706':'#0f172a'):'#e2e8f0',fontWeight:hrs>8?700:400,background:dm.isHoliday&&hrs>0?'#fef2f2':isRestDay&&hrs>0?'#fffbeb':'transparent'}}>{hrs>0?hrs:'—'}</td>})}
                     <td style={{textAlign:'right',padding:'6px',fontWeight:700,fontSize:11,borderLeft:'2px solid #e2e8f0'}}>{total>0?`${total}h`:'—'}</td>
                     <td style={{textAlign:'center',padding:'6px'}}>
                       {canApproveOps&&!opsRejected&&!step3Approved&&(isFlagged?<span style={{fontSize:10,color:'#dc2626',fontWeight:600}}>⚠ Flagged</span>:flaggingWorker===w.id?null:<button className="btn btn-ghost btn-sm" style={{fontSize:10,color:'#d97706'}} onClick={() => {setFlaggingWorker(w.id);setFlagNote('')}}>Flag</button>)}

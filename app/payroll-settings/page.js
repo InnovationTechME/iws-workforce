@@ -213,9 +213,10 @@ export default function PayrollSettingsPage() {
 
       <div className="panel" style={{ marginTop: 16 }}>
         <div className="panel-header"><div><h2>Current payroll rules in effect</h2></div></div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12 }}>
           {[
             ['OT threshold', ramadanActive ? 'Per enabled timesheet' : '8 hours standard', ramadanActive ? '#7c3aed' : 'var(--teal)'],
+            ['Rest day', 'Sunday default; per-worker override', '#d97706'],
             ['OT1 rate', '125% of hourly rate', 'var(--teal)'],
             ['Public holiday rate', '150% of hourly rate', '#d97706'],
             ['Flat workers', 'No OT premium; flat rate only', '#64748b'],

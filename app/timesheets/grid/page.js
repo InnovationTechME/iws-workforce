@@ -376,10 +376,10 @@ function TimesheetGridContent() {
         <div style={{textAlign:'center',padding:60,color:'#64748b'}}>No workers found for this client. {clientId === INNOVATION_INTERNAL_ID ? 'No active Permanent Staff workers exist.' : 'Workers may not be assigned to this client.'}</div>
       ) : (
         <div style={{overflowX:'auto',border:'1px solid #e2e8f0',borderRadius:8,background:'white'}}>
-          <table style={{borderCollapse:'collapse',fontSize:11,width:'100%',minWidth: numDays * 44 + 200 + 200}}>
+          <table style={{borderCollapse:'collapse',fontSize:10,width:'100%',minWidth: numDays * 30 + 300,tableLayout:'fixed'}}>
             <thead>
               <tr style={{background:'#f8fafc'}}>
-                <th style={{position:'sticky',left:0,background:'#f8fafc',zIndex:2,padding:'6px 8px',textAlign:'left',borderRight:'2px solid #e2e8f0',minWidth:160,fontSize:11,fontWeight:600}}>Worker</th>
+                <th style={{position:'sticky',left:0,background:'#f8fafc',zIndex:2,padding:'5px 7px',textAlign:'left',borderRight:'2px solid #e2e8f0',width:148,fontSize:10,fontWeight:600}}>Worker</th>
                 {Array.from({ length: numDays }, (_, i) => {
                   const day = i + 1
                   const dateStr = formatDateStr(day, month, year)
@@ -390,17 +390,17 @@ function TimesheetGridContent() {
                   const isHol = !!holName
                   const bg = isHol ? '#fecaca' : isRest ? '#fef3c7' : '#f8fafc'
                   return (
-                    <th key={day} title={holName || ''} style={{padding:'4px 2px',textAlign:'center',background: bg,borderBottom:'1px solid #e2e8f0',minWidth:40,fontSize:10}}>
+                    <th key={day} title={holName || ''} style={{padding:'3px 1px',textAlign:'center',background: bg,borderBottom:'1px solid #e2e8f0',width:30,fontSize:9}}>
                       <div>{day}</div>
-                      <div style={{fontSize:9,color:'#94a3b8'}}>{DAY_LETTERS[dow]}</div>
+                      <div style={{fontSize:8,color:'#94a3b8'}}>{DAY_LETTERS[dow]}</div>
                       {isHol && <div style={{fontSize:7,color:'#dc2626',lineHeight:1}}>{holName.length > 6 ? holName.slice(0,6)+'..' : holName}</div>}
                     </th>
                   )
                 })}
-                <th style={{padding:'4px 6px',textAlign:'center',background:'#f0fdfa',borderLeft:'2px solid #e2e8f0',fontSize:10,minWidth:40}}>Norm</th>
-                <th style={{padding:'4px 6px',textAlign:'center',background:'#fef9c3',fontSize:10,minWidth:36}}>OT1</th>
-                <th style={{padding:'4px 6px',textAlign:'center',background:'#fee2e2',fontSize:10,minWidth:36}}>OT2</th>
-                <th style={{padding:'4px 6px',textAlign:'center',background:'#f0fdfa',borderRight:'none',fontSize:10,minWidth:40}}>Total</th>
+                <th style={{padding:'4px 4px',textAlign:'center',background:'#f0fdfa',borderLeft:'2px solid #e2e8f0',fontSize:9,width:38}}>Norm</th>
+                <th style={{padding:'4px 4px',textAlign:'center',background:'#fef9c3',fontSize:9,width:34}}>OT1</th>
+                <th style={{padding:'4px 4px',textAlign:'center',background:'#fee2e2',fontSize:9,width:34}}>OT2</th>
+                <th style={{padding:'4px 4px',textAlign:'center',background:'#f0fdfa',borderRight:'none',fontSize:9,width:38}}>Total</th>
               </tr>
             </thead>
             <tbody>
@@ -410,9 +410,9 @@ function TimesheetGridContent() {
                 if (showConflictsOnly && !hasConflict) return null
                 return (
                   <tr key={worker.id} style={{borderBottom:'1px solid #f1f5f9'}}>
-                    <td style={{position:'sticky',left:0,background:'white',zIndex:1,padding:'6px 8px',borderRight:'2px solid #e2e8f0',fontSize:11}}>
-                      <div style={{fontWeight:600}}>{worker.full_name}</div>
-                      <div style={{fontSize:10,color:'#94a3b8',fontFamily:'monospace'}}>{worker.worker_number}</div>
+                    <td style={{position:'sticky',left:0,background:'white',zIndex:1,padding:'5px 7px',borderRight:'2px solid #e2e8f0',fontSize:10}}>
+                      <div style={{fontWeight:600,lineHeight:1.15}}>{worker.full_name}</div>
+                      <div style={{fontSize:9,color:'#94a3b8',fontFamily:'monospace'}}>{worker.worker_number}</div>
                     </td>
                     {Array.from({ length: numDays }, (_, i) => {
                       const day = i + 1
@@ -428,7 +428,7 @@ function TimesheetGridContent() {
                       return (
                         <td key={day} style={{padding:1,position:'relative',background: bg,borderRight:'1px solid #f1f5f9'}}>
                           {isResolved ? (
-                            <div style={{width:'100%',height:28,display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:600,cursor:'pointer',color: cell.absence_status === 'unauthorised_absent' ? '#6b7280' : cell.absence_status === 'sick_certified' ? '#166534' : cell.absence_status === 'approved_leave' ? '#1e40af' : '#475569'}}
+                            <div style={{width:'100%',height:24,display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:600,cursor:'pointer',color: cell.absence_status === 'unauthorised_absent' ? '#6b7280' : cell.absence_status === 'sick_certified' ? '#166534' : cell.absence_status === 'approved_leave' ? '#1e40af' : '#475569'}}
                               title={cell.absence_status === 'sick_certified' ? `Sick cert: ${cell.sick_cert_reference || ''}` : cell.absence_status}>
                               {cell.absence_status === 'sick_certified' && '\ud83c\udfe5'}
                               {cell.absence_status === 'short_day_authorised' && '\u2713'}
@@ -441,7 +441,7 @@ function TimesheetGridContent() {
                                 disabled={locked || !canEdit}
                                 onChange={e => handleCellChange(worker.id, day, e.target.value)}
                                 onBlur={e => { if (e.target.value !== '') handleCellChange(worker.id, day, capHours(e.target.value)) }}
-                                style={{width:'100%',height:28,textAlign:'center',border: state === 'editing' ? '2px solid #eab308' : state === 'error' ? '2px solid #dc2626' : '1px solid transparent',borderRadius:3,background:'transparent',fontSize:11,outline:'none',padding:0,color: isConflict ? '#c2410c' : '#0f172a'}} />
+                                style={{width:'100%',height:24,textAlign:'center',border: state === 'editing' ? '2px solid #eab308' : state === 'error' ? '2px solid #dc2626' : '1px solid transparent',borderRadius:3,background:'transparent',fontSize:10,outline:'none',padding:0,color: isConflict ? '#c2410c' : '#0f172a'}} />
                               {isConflict && <span style={{position:'absolute',top:0,right:1,fontSize:9,cursor:'pointer'}} onClick={() => setActivePopover(key)}>{'\u26a0'}</span>}
                               {state === 'saving' && <span style={{position:'absolute',bottom:0,right:1,fontSize:7,color:'#94a3b8'}}>...</span>}
                               {state === 'error' && <span style={{position:'absolute',bottom:0,right:1,fontSize:7,color:'#dc2626',cursor:'pointer'}} onClick={() => saveCell(worker.id, day, val)}>\u21bb</span>}
