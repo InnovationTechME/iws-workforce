@@ -11,6 +11,7 @@ import { getCertificationsByWorker } from '../../lib/certificationService'
 import { getDocumentTemplate } from '../../lib/documentRegister'
 import { formatDate, getStatusTone } from '../../lib/utils'
 import { listPastExperience } from '../../lib/workExperienceService'
+import { getWorkerPhotoDataUrl } from '../../lib/workerPhotoService'
 import { LOGO_BASE64 } from '../../lib/logoBase64'
 
 // Normalise `worker.entry_track` for records that pre-date the §5.3.5
@@ -107,6 +108,7 @@ export default function PacksPage() {
   const [building, setBuilding] = useState(false)
   const [showCoverPreview, setShowCoverPreview] = useState(false)
   const [pastExperiences, setPastExperiences] = useState([])
+  const [coverPhotoDataUrl, setCoverPhotoDataUrl] = useState(null)
 
   useEffect(() => {
     let alive = true
@@ -151,20 +153,27 @@ export default function PacksPage() {
     if (!worker) return
     setSelectedWorker(resolveEntryTrack(worker))
     setSelectedDocIds([])
+    setCoverPhotoDataUrl(null)
     try {
-      const [docs, certs, past] = await Promise.all([
+      const [docs, certs, past, photoDataUrl] = await Promise.all([
         getDocumentsByWorker(workerId),
         getCertificationsByWorker(workerId),
         listPastExperience(workerId).catch(() => []),
+        getWorkerPhotoDataUrl(workerId).catch(error => {
+          console.error(`Failed to load worker cover photo for ${workerId}:`, error)
+          return null
+        }),
       ])
       setWorkerDocs(docs)
       setWorkerCerts(certs)
       setPastExperiences(past)
+      setCoverPhotoDataUrl(photoDataUrl || null)
     } catch (e) {
       console.error('openPackBuilder error:', e)
       setWorkerDocs([])
       setWorkerCerts([])
       setPastExperiences([])
+      setCoverPhotoDataUrl(null)
     }
   }
 
@@ -186,7 +195,7 @@ export default function PacksPage() {
       // Cover page always first. §5.3.8 — listPastExperience skips the
       // system is_current row so the cover template's hardcoded
       // "Innovation Technologies" row isn't duplicated.
-      const coverHtml = workerCoverPageHTML(selectedWorker, pastExperiences)
+      const coverHtml = workerCoverPageHTML(selectedWorker, pastExperiences, coverPhotoDataUrl)
       folder.file(`00_${selectedWorker.worker_number}_CoverPage.html`, coverHtml)
 
       // Auto-include every `in_pack` doc per the worker's template.
@@ -435,10 +444,18 @@ export default function PacksPage() {
                   </div>
                 </div>
                 <div style={{flex:'0 0 40%',display:'flex',justifyContent:'flex-end'}}>
-                  <div style={{width:80,height:100,background:'#f5f1eb',border:'1px solid #e7e0d4',borderRadius:6,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
-                    <div style={{fontSize:10,fontWeight:700,color:'#94a3b8',letterSpacing:1}}>PHOTO</div>
-                    <div style={{fontSize:10,fontWeight:700,color:'#94a3b8',letterSpacing:1,marginTop:2}}>PENDING</div>
-                  </div>
+                  {coverPhotoDataUrl ? (
+                    <img
+                      src={coverPhotoDataUrl}
+                      alt={w.full_name ? `${w.full_name} passport photo` : 'Worker passport photo'}
+                      style={{width:80,height:100,objectFit:'cover',border:'1px solid #e7e0d4',borderRadius:6,display:'block'}}
+                    />
+                  ) : (
+                    <div style={{width:80,height:100,background:'#f5f1eb',border:'1px solid #e7e0d4',borderRadius:6,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
+                      <div style={{fontSize:10,fontWeight:700,color:'#94a3b8',letterSpacing:1}}>PHOTO</div>
+                      <div style={{fontSize:10,fontWeight:700,color:'#94a3b8',letterSpacing:1,marginTop:2}}>PENDING</div>
+                    </div>
+                  )}
                 </div>
               </div>
               {/* ID & Compliance */}

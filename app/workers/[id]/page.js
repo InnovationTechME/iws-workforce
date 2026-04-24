@@ -6,6 +6,7 @@ import AppShell from '../../../components/AppShell'
 import PageHeader from '../../../components/PageHeader'
 import StatusBadge from '../../../components/StatusBadge'
 import LetterViewer from '../../../components/LetterViewer'
+import WorkerAvatar from '../../../components/WorkerAvatar'
 import { getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS, calculateLeaveBalance, getILOEStatus, updateDocument, generateDocFileName } from '../../../lib/mockStore'
 import { getWorkerById } from '../../../lib/workerService'
 import { getDocumentsByWorker, upsertDocument } from '../../../lib/documentService'
@@ -181,7 +182,8 @@ export default function WorkerDetailPage() {
       <PageHeader eyebrow="Worker detail" title={worker.full_name}
         description={`${worker.worker_number} · ${worker.category} · ${worker.trade_role}`}
         actions={<div style={{display:'flex',gap:8}}><Link href="/workers" className="btn btn-secondary">← Workers</Link></div>}
-        meta={<StatusBadge label={worker.status} tone={getStatusTone(worker.status)} />} />
+        meta={<StatusBadge label={worker.status} tone={getStatusTone(worker.status)} />}
+        media={<WorkerAvatar workerId={worker.id} name={worker.full_name} size={72} />} />
 
       {(() => { const obr = getOffboardingByWorker(id); return obr && obr.status === 'in_progress' ? (
         <div style={{background:'#fff7ed',border:'2px solid #f97316',borderRadius:8,padding:'12px 16px',marginBottom:16,display:'flex',alignItems:'center',gap:12}}>
@@ -318,8 +320,8 @@ export default function WorkerDetailPage() {
                   {worker.transport_allowance > 0 && <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Transport allowance</div><div style={{fontSize:13,fontWeight:500}}>{formatCurrency(worker.transport_allowance)}/mo</div></div>}
                   {worker.food_allowance > 0 && <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Food allowance</div><div style={{fontSize:13,fontWeight:500}}>{formatCurrency(worker.food_allowance)}/mo</div></div>}
                   <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>Total package</div><div style={{fontSize:13,fontWeight:700,color:'var(--teal)'}}>{formatCurrency(worker.monthly_salary + (worker.housing_allowance||0) + (worker.transport_allowance||0) + (worker.food_allowance||0) + (worker.other_allowance||0))}/mo</div></div>
-                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (weekday 125%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.monthly_salary / 26 / 8 * 1.25).toFixed(2)}/hr</div></div>
-                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (Friday 150%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.monthly_salary / 26 / 8 * 1.5).toFixed(2)}/hr</div></div>
+                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (weekday 125%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.monthly_salary / 30 / 8 * 1.25).toFixed(2)}/hr</div></div>
+                  <div><div style={{fontSize:11,color:'var(--hint)',marginBottom:3}}>OT rate (rest day 150%)</div><div style={{fontSize:13,fontWeight:500}}>AED {(worker.monthly_salary / 30 / 8 * 1.5).toFixed(2)}/hr</div></div>
                 </div>
               ) : (() => {
                 const flatRate = worker.entry_track === 'contract_worker' || worker.entry_track === 'subcontractor_company_worker'
@@ -887,7 +889,7 @@ export default function WorkerDetailPage() {
                               try {
                                 const { data: dailyLines } = await supabase
                                   .from('timesheet_lines')
-                                  .select('work_date, total_hours, ot_hours, ot1_hours, is_public_holiday, is_friday')
+                                  .select('work_date, total_hours, ot_hours, ot1_hours, is_public_holiday, is_rest_day, is_friday')
                                   .eq('header_id', row.header_id)
                                   .eq('worker_id', id)
                                   .order('work_date')

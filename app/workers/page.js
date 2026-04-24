@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
+import WorkerAvatar from '../../components/WorkerAvatar'
 import { getWorkers } from '../../lib/workerService'
+import { getWorkerPhotoUrls } from '../../lib/workerPhotoService'
 import { formatCurrency, getStatusTone } from '../../lib/utils'
 
 const statusOptions = [
@@ -22,6 +24,8 @@ const isMonthlyCategory = (worker) => ['Permanent Staff', 'Office Staff'].includ
 
 export default function WorkersPage() {
   const [workers, setWorkers] = useState([])
+  const [workerPhotoUrls, setWorkerPhotoUrls] = useState({})
+  const [photoLookupReady, setPhotoLookupReady] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [search, setSearch] = useState('')
@@ -30,19 +34,41 @@ export default function WorkersPage() {
   const router = useRouter()
 
   useEffect(() => {
+    let cancelled = false
+
     const load = async () => {
       try {
         setLoading(true)
         const data = await getWorkers()
+        if (cancelled) return
         setWorkers(data || [])
+
+        try {
+          const photoUrls = await getWorkerPhotoUrls((data || []).map(worker => worker.id))
+          if (!cancelled) {
+            setWorkerPhotoUrls(photoUrls)
+            setPhotoLookupReady(true)
+          }
+        } catch (photoError) {
+          console.error('Failed to batch load worker photos:', photoError)
+          if (!cancelled) {
+            setWorkerPhotoUrls({})
+            setPhotoLookupReady(false)
+          }
+        }
       } catch (err) {
         console.error('Failed to load workers:', err)
-        setWorkers([])
+        if (!cancelled) {
+          setWorkers([])
+          setWorkerPhotoUrls({})
+          setPhotoLookupReady(true)
+        }
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
     load()
+    return () => { cancelled = true }
   }, [])
 
   const filtered = workers.filter(w => {
@@ -94,7 +120,7 @@ export default function WorkersPage() {
               <tbody>
                 {filtered.map(w => (
                   <tr key={w.id} style={{opacity:isInactiveWorker(w)?0.6:1,borderLeft:isInactiveWorker(w)?'3px solid #94a3b8':''}}>
-                    <td><div style={{display:'flex',alignItems:'center',gap:8}}><div style={{width:32,height:32,borderRadius:'50%',background:'var(--teal-bg)',border:'1px solid var(--teal-border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:600,color:'var(--teal)',flexShrink:0}}>{(w.full_name || '').split(' ').filter(Boolean).map(n=>n[0]).join('').slice(0,2) || 'IW'}</div><div><div style={{fontWeight:500}}>{w.full_name}</div><div style={{fontSize:11,color:'var(--hint)'}}>{w.worker_number}</div></div></div></td>
+                    <td><div style={{display:'flex',alignItems:'center',gap:8}}><WorkerAvatar workerId={w.id} name={w.full_name} size={32} photoUrl={photoLookupReady ? (workerPhotoUrls[w.id] ?? null) : undefined} /><div><div style={{fontWeight:500}}>{w.full_name}</div><div style={{fontSize:11,color:'var(--hint)'}}>{w.worker_number}</div></div></div></td>
                     <td>{w.trade_role}</td>
                     <td>
                       <StatusBadge label={w.category} tone={w.category === 'Subcontract Worker' ? 'neutral' : w.category === 'Office Staff' ? 'info' : 'neutral'} />
