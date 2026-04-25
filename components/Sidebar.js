@@ -13,7 +13,7 @@ const navSections = [
     { href:'/onboarding', label:'Onboarding', module:'onboarding' },
     { href:'/workers', label:'Workers', module:'workers' },
     { href:'/suppliers', label:'Suppliers', module:'suppliers' },
-    { href:'/offboarding-exit', label:'Worker Exit', module:'offboarding-exit' },
+    { href:'/offboarding-exit', label:'Offboarding', module:'offboarding-exit' },
     { href:'/blacklist', label:'Blacklist', module:'blacklist' },
   ]},
   { title:'COMPLIANCE & DOCUMENTS', items:[

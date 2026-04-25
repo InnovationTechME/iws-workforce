@@ -19,14 +19,6 @@ import { upsertDocument } from '../../lib/documentService'
 import { uploadWorkerDocument } from '../../lib/storageService'
 import { supabase } from '../../lib/supabaseClient'
 import { formatCurrency, formatDate } from '../../lib/utils'
-import {
-  exitClearanceHTML,
-  experienceLetterHTML,
-  finalSettlementHTML,
-  resignationAcceptanceHTML,
-  terminationWithNoticeHTML,
-  terminationWithoutNoticeHTML,
-} from '../../lib/letterTemplates'
 
 const EXIT_DOC_OPTIONS = [
   { value: 'resignation_letter', label: 'Resignation Letter' },
@@ -38,6 +30,20 @@ const EXIT_DOC_OPTIONS = [
 
 const MAX_EXIT_FILE_SIZE = 10 * 1024 * 1024
 const EXIT_FILE_TYPES = ['application/pdf', 'image/jpeg', 'image/png']
+
+const TRACK_LABELS = {
+  direct_staff: 'IT Direct Staff',
+  contract_worker: 'Contract Worker',
+  subcontractor_company_worker: 'Supplier Company Worker',
+}
+
+const STEP_DEFINITIONS = [
+  { key: 'initiated', label: 'Initiated' },
+  { key: 'documents', label: 'Exit documents' },
+  { key: 'settlement', label: 'Payroll settlement' },
+  { key: 'clearance', label: 'Clearance' },
+  { key: 'closure', label: 'File closure' },
+]
 
 function defaultExitDocType(reason) {
   return reason === 'Resignation' ? 'resignation_letter' : 'termination_notice'
@@ -77,6 +83,28 @@ function withSettlementTotal(next) {
     + Number(next.manualAdjustments || 0)
     - Number(next.deductions || 0)
   return { ...next, amount: Math.round(total * 100) / 100 }
+}
+
+function getTrackLabel(worker) {
+  const track = worker?.entry_track
+    || (worker?.category === 'Permanent Staff' || worker?.category === 'Office Staff' ? 'direct_staff' : null)
+    || (worker?.category === 'Subcontract Worker' ? 'subcontractor_company_worker' : null)
+    || (worker?.category === 'Contract Worker' ? 'contract_worker' : null)
+  return TRACK_LABELS[track] || track || 'Worker'
+}
+
+function getStepState(record) {
+  const checklist = record?.checklist || {}
+  const hasExitDocument = checklist.final_payslip_issued?.done || checklist.eos_approved?.done
+  const hasClearance = checklist.exit_clearance_signed?.done
+  const hasSettlement = Number(record?.eos_amount || 0) > 0 || checklist.eos_approved?.done
+  return {
+    initiated: true,
+    documents: checklist.final_payslip_issued?.done || checklist.visa_cancellation_initiated?.done || hasExitDocument,
+    settlement: hasSettlement,
+    clearance: hasClearance,
+    closure: record?.status === 'closed',
+  }
 }
 
 export default function OffboardingExitPage() {
@@ -241,7 +269,7 @@ export default function OffboardingExitPage() {
         is_blocking: false,
         file_url: `${bucket}::${path}`,
         uploaded_at: new Date().toISOString(),
-        notes: `Uploaded from Worker Exit (${selected.reason})`,
+        notes: `Uploaded from Offboarding (${selected.reason})`,
         updated_at: new Date().toISOString(),
       })
       setDetailFile(null)
@@ -269,8 +297,16 @@ export default function OffboardingExitPage() {
     }
   }
 
-  function handleGenerateDocument(kind) {
+  async function handleGenerateDocument(kind) {
     if (!selected?.worker) return
+    const {
+      exitClearanceHTML,
+      experienceLetterHTML,
+      finalSettlementHTML,
+      resignationAcceptanceHTML,
+      terminationWithNoticeHTML,
+      terminationWithoutNoticeHTML,
+    } = await import('../../lib/letterTemplates')
     const worker = { ...selected.worker, end_date: selected.last_working_date }
     const today = new Date().toISOString().split('T')[0]
     let html = ''
@@ -351,9 +387,9 @@ export default function OffboardingExitPage() {
   return (
     <AppShell pageTitle="Offboarding">
       <PageHeader
-        eyebrow="Worker Exit"
-        title="Worker exit & offboarding"
-        description="Complete all exit checklist items before a worker file can be closed. Prevents double-payment and ensures compliance."
+        eyebrow="Offboarding"
+        title="Offboarding"
+        description="Run worker exits through documents, payroll settlement, clearance, and final file closure."
         actions={<button className="btn btn-danger" onClick={() => setShowInitiate(true)} disabled={busy}>+ Initiate Offboarding</button>}
       />
 
@@ -385,7 +421,7 @@ export default function OffboardingExitPage() {
             <div className="empty-state"><h3>No offboarding records</h3><p>Initiate offboarding when a worker leaves.</p></div>
           ) : (
             <div className="table-wrap"><table>
-              <thead><tr><th>Worker</th><th>Reason</th><th>Last day</th><th>Progress</th><th>Status</th></tr></thead>
+              <thead><tr><th>Worker</th><th>Track</th><th>Reason</th><th>Last day</th><th>Progress</th><th>Status</th></tr></thead>
               <tbody>
                 {records.map(r => {
                   const done = OFFBOARDING_ITEMS.filter(i => i.required && r.checklist[i.key]?.done).length
@@ -393,6 +429,7 @@ export default function OffboardingExitPage() {
                   return (
                     <tr key={r.id} style={{ cursor: 'pointer', background: selected?.id === r.id ? '#eff6ff' : '' }} onClick={() => setSelected(r)}>
                       <td style={{ fontWeight: 500 }}><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><WorkerAvatar workerId={r.worker_id} name={r.worker_name} size={34} /><div>{r.worker_name}<div style={{ fontSize: 11, color: 'var(--hint)' }}>{r.worker_number}</div></div></div></td>
+                      <td style={{ fontSize: 11, color: 'var(--muted)' }}>{getTrackLabel(r.worker)}</td>
                       <td style={{ fontSize: 12 }}>{r.reason}</td>
                       <td style={{ fontSize: 12, color: 'var(--muted)' }}>{formatDate(r.last_working_date)}</td>
                       <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ flex: 1, height: 4, background: 'var(--border)', borderRadius: 2 }}><div style={{ width: `${pct}%`, height: '100%', background: pct === 100 ? 'var(--success)' : 'var(--warning)', borderRadius: 2 }} /></div><span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{done}/{requiredCount}</span></div></td>
@@ -408,8 +445,23 @@ export default function OffboardingExitPage() {
         {selected && (
           <div className="panel">
             <div className="panel-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><WorkerAvatar workerId={selected.worker_id} name={selected.worker_name} size={48} /><div><h2>{selected.worker_name}</h2><p>{selected.worker_number} - {selected.reason} - Last day: {formatDate(selected.last_working_date)}</p></div></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><WorkerAvatar workerId={selected.worker_id} name={selected.worker_name} size={48} /><div><h2>{selected.worker_name}</h2><p>{selected.worker_number} - {getTrackLabel(selected.worker)} - {selected.reason} - Last day: {formatDate(selected.last_working_date)}</p></div></div>
               <StatusBadge label={selected.status} tone={selected.status === 'closed' ? 'success' : 'warning'} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8, marginBottom: 14 }}>
+              {(() => {
+                const stepState = getStepState(selected)
+                return STEP_DEFINITIONS.map((step, index) => {
+                  const complete = Boolean(stepState[step.key])
+                  return (
+                    <div key={step.key} style={{ border: `1px solid ${complete ? '#86efac' : 'var(--border)'}`, background: complete ? '#f0fdf4' : '#f8fafc', borderRadius: 8, padding: '10px 8px', minHeight: 58 }}>
+                      <div style={{ width: 22, height: 22, borderRadius: 999, background: complete ? 'var(--success)' : '#e2e8f0', color: complete ? 'white' : '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{index + 1}</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: complete ? '#166534' : 'var(--muted)', lineHeight: 1.25 }}>{step.label}</div>
+                    </div>
+                  )
+                })
+              })()}
             </div>
 
             <div style={{ background: '#f8fafc', border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 14 }}>

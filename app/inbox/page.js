@@ -25,6 +25,30 @@ const EXPIRY_HINTS = {
   labour_card: 'Labour card follows visa expiry'
 }
 
+const EMPTY_INBOX = {
+  missingDocs: [],
+  expiredDocs: [],
+  expiringDocs: [],
+  contractsDue: [],
+  expiredCerts: [],
+  expiringCerts: [],
+  openWarnings: [],
+  pendingTimesheets: [],
+  leaveRequests: [],
+  pendingTasks: [],
+  pendingDiscrepancies: [],
+}
+
+function normaliseInbox(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  return Object.fromEntries(
+    Object.entries(EMPTY_INBOX).map(([key, fallback]) => [
+      key,
+      Array.isArray(source[key]) ? source[key] : fallback,
+    ])
+  )
+}
+
 function titleCase(str) {
   return (str || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
@@ -72,7 +96,7 @@ function InboxPanel({ title, items, tone, linkHref, renderItem }) {
 }
 
 export default function InboxPage() {
-  const [inbox, setInbox] = useState(null)
+  const [inbox, setInbox] = useState(EMPTY_INBOX)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerType, setDrawerType] = useState(null)
   const [drawerRecord, setDrawerRecord] = useState(null)
@@ -92,7 +116,7 @@ export default function InboxPage() {
       setLoading(true)
       setLoadError(null)
       try {
-        setInbox(getInboxItems())
+        setInbox(normaliseInbox(getInboxItems()))
         const [rows, alerts] = await Promise.all([getTasks(), getInsuranceExpiryAlerts()])
         if (!cancelled) {
           setTasks(rows || [])
@@ -107,10 +131,8 @@ export default function InboxPage() {
     return () => { cancelled = true }
   }, [])
 
-  if (!inbox) return null
-
   const refreshInbox = async () => {
-    setInbox(getInboxItems())
+    setInbox(normaliseInbox(getInboxItems()))
     try { setTasks(await getTasks()) } catch (err) { setLoadError(err?.message || 'Failed to refresh inbox') }
   }
 
