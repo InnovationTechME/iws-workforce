@@ -708,6 +708,7 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
               <option value="">Select supplier</option>
               {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
+            <div style={{fontSize:11,color:'var(--hint)',marginTop:4}}>Add the company first in <a href="/suppliers" style={{color:'var(--teal)',fontWeight:600}}>Suppliers</a>, then return here to onboard its workers.</div>
           </div>
           <div className="form-field"><label className="form-label">Agreed hourly rate (AED) *</label>
             <input className="form-input" type="number" value={form.supplier_rate} onChange={e => set('supplier_rate', e.target.value)} placeholder="Pre-fills from supplier rates when available" />
