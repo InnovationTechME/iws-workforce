@@ -13,7 +13,7 @@ import {
   getPendingCarryOverNotes, resolveCarryOverNote
 } from '../../lib/mockStore'
 import { getAllAttendance, addAttendanceRecord, getAttendanceConflicts, getCarryOverNotes } from '../../lib/attendanceService'
-import { formatDate, getDailyRate } from '../../lib/utils'
+import { formatDate } from '../../lib/utils'
 
 const REASON_LABELS = { sick_with_cert:'Sick — certificate provided', absent_no_cert:'Absent — no certificate', late:'Late arrival' }
 const toneMap = { sick_with_cert:'warning', absent_no_cert:'danger', late:'neutral' }
@@ -108,9 +108,8 @@ export default function AttendancePage() {
       autoWarningId = makeId('wm')
       let penaltyAmount = 0, penaltyType = '', warningReason = ''
       if (newOffenceNumber === 1) { warningReason = `1st offence — absent without certificate on ${form.date}.` }
-      else { const dailyRate = getDailyRate(worker); penaltyAmount = Math.round(dailyRate*2*100)/100; penaltyType = 'deduction'; warningReason = `${newOffenceNumber}${newOffenceNumber===2?'nd':'th'} offence — absent without certificate on ${form.date}. 2-day penalty applied.` }
+      else { warningReason = `${newOffenceNumber}${newOffenceNumber===2?'nd':'th'} offence — absent without certificate on ${form.date}. Review under Article 39 disciplinary workflow before applying any penalty.` }
       addWarning({ id:autoWarningId, worker_id:form.worker_id, worker_name:worker?.full_name||'', worker_number:worker?.worker_number||'', warning_type:'warning', issue_date:form.date, reason:warningReason, issued_by:'System — Attendance', status:'open', penalty_amount:penaltyAmount||'', penalty_type:penaltyType, notes:`Auto-generated. Offence #${newOffenceNumber}` })
-      if (newOffenceNumber >= 2 && penaltyAmount > 0) { addPenaltyDeduction({ id:makeId('pd'), warning_id:autoWarningId, worker_id:form.worker_id, worker_name:worker?.full_name||'', worker_number:worker?.worker_number||'', label:`Attendance penalty — ${newOffenceNumber}${newOffenceNumber===2?'nd':'th'} offence (${form.date})`, amount:penaltyAmount, type:penaltyType, status:'pending_hr_confirmation', created_at:form.date }) }
     }
     const record = { id:makeId('att'), worker_id:form.worker_id, worker_name:worker?.full_name||'', worker_number:worker?.worker_number||'', date:form.date, reason:form.reason, cert_filename:form.cert_filename, cert_verification_status:form.verification_status||null, cert_verification_notes:form.verification_notes||null, no_work_no_pay:form.reason!=='late', allowance_suspended:form.reason==='absent_no_cert', auto_warning_created:form.reason==='absent_no_cert', auto_warning_id:autoWarningId, offence_number:newOffenceNumber, notes:form.notes }
     await addAttendanceRecord(record)
@@ -621,7 +620,7 @@ export default function AttendancePage() {
                 </div>
               </div>)}
             </>}
-            {form.reason === 'absent_no_cert' && <div style={{background:'#fff7ed',border:'1px solid var(--warning)',borderRadius:6,padding:'10px 12px'}}><div style={{fontSize:12,fontWeight:500,color:'var(--warning)',marginBottom:4}}>Auto-actions:</div><div style={{fontSize:12,color:'var(--muted)',display:'flex',flexDirection:'column',gap:3}}><div>{'\u2713'} No-work-no-pay applied</div><div>{'\u2713'} Allowance suspended</div><div>{'\u2713'} Warning auto-created</div>{form.worker_id && getWorkerOffenceCount(form.worker_id) >= 1 && <div style={{color:'var(--danger)',fontWeight:500}}>{'\u26A0'} 2nd+ offence — 2-day penalty auto-calculated</div>}</div></div>}
+            {form.reason === 'absent_no_cert' && <div style={{background:'#fff7ed',border:'1px solid var(--warning)',borderRadius:6,padding:'10px 12px'}}><div style={{fontSize:12,fontWeight:500,color:'var(--warning)',marginBottom:4}}>Auto-actions:</div><div style={{fontSize:12,color:'var(--muted)',display:'flex',flexDirection:'column',gap:3}}><div>{'\u2713'} No-work-no-pay applied</div><div>{'\u2713'} Allowance suspended</div><div>{'\u2713'} Warning auto-created</div>{form.worker_id && getWorkerOffenceCount(form.worker_id) >= 1 && <div style={{color:'var(--danger)',fontWeight:500}}>{'\u26A0'} Repeat offence — review in disciplinary workflow before applying any penalty</div>}</div></div>}
             <div className="form-field"><label className="form-label">Notes</label><textarea className="form-textarea" value={form.notes} onChange={e => setForm({...form,notes:e.target.value})} rows={2} /></div>
           </div>
         </DrawerForm>

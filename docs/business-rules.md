@@ -30,9 +30,9 @@ Standard documented hours:
 Documented policy states:
 - hours above 8 per day count as overtime
 - weekday overtime is 1.25x hourly rate
-- Friday and public holiday overtime is 1.50x
-- flat-rate contract workers do not receive ordinary overtime premium on normal extra hours
-- flat-rate workers receive 1.50x flat rate for public holiday hours
+- rest-day and public holiday overtime is 1.50x for monthly site staff
+- Friday is a normal working day unless it is separately configured as a public holiday
+- flat-rate contract and subcontract workers are paid their flat hourly rate only, with no overtime or holiday premium
 
 ## Leave rules
 
