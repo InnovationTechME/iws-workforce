@@ -533,6 +533,7 @@ function OnboardingPage() {
             blacklistHit={blacklistHit}
             onPassportBlur={handlePassportBlur}
             suppliers={suppliers}
+            supplierRates={supplierRates}
           />
         </DrawerForm>
       )}
@@ -585,7 +586,7 @@ function OnboardingRow({ worker, onOpen }) {
   )
 }
 
-function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassportBlur, suppliers }) {
+function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassportBlur, suppliers, supplierRates = [] }) {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   // §5.3.6 — passport expiry must be ≥7 months from joining date (contract &
   // supplier tracks; direct_staff is validated on the Offers form and
@@ -710,8 +711,22 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
             </select>
             <div style={{fontSize:11,color:'var(--hint)',marginTop:4}}>Add the company first in <a href="/suppliers" style={{color:'var(--teal)',fontWeight:600}}>Suppliers</a>, then return here to onboard its workers.</div>
           </div>
+          <div className="form-field"><label className="form-label">Supplier agreed trade/rate *</label>
+            <select
+              className="form-select"
+              value={form.supplier_id && form.trade_role && form.supplier_rate ? `${form.trade_role}__${form.supplier_rate}` : ''}
+              onChange={e => {
+                const selected = supplierRates.find(r => `${r.trade_role}__${r.hourly_rate}` === e.target.value)
+                if (selected) setForm(f => ({ ...f, trade_role: selected.trade_role, supplier_rate: selected.hourly_rate }))
+              }}
+              disabled={!form.supplier_id || supplierRates.length === 0}>
+              <option value="">{form.supplier_id ? 'Select agreed rate' : 'Select supplier first'}</option>
+              {supplierRates.map(r => <option key={r.id} value={`${r.trade_role}__${r.hourly_rate}`}>{r.trade_role} - AED {Number(r.hourly_rate).toFixed(2)}/hr</option>)}
+            </select>
+            {form.supplier_id && supplierRates.length === 0 && <div style={{fontSize:11,color:'#b45309',marginTop:4}}>No rates are set for this supplier yet. Add rates under Suppliers before onboarding workers.</div>}
+          </div>
           <div className="form-field"><label className="form-label">Agreed hourly rate (AED) *</label>
-            <input className="form-input" type="number" value={form.supplier_rate} onChange={e => set('supplier_rate', e.target.value)} placeholder="Pre-fills from supplier rates when available" />
+            <input className="form-input" type="number" value={form.supplier_rate} onChange={e => set('supplier_rate', e.target.value)} placeholder="Auto-filled from supplier agreed rate" />
           </div>
           <div className="form-field"><label className="form-label">Expected site start date</label>
             <input className="form-input" type="date" value={form.joining_date} onChange={e => set('joining_date', e.target.value)} />

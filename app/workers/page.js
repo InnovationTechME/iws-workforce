@@ -1,7 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
@@ -22,7 +22,12 @@ const isActiveWorker = (worker) => String(worker.status || '').toLowerCase() ===
 const isInactiveWorker = (worker) => String(worker.status || '').toLowerCase() === 'inactive' || worker.active === false
 const isMonthlyCategory = (worker) => ['Permanent Staff', 'Office Staff'].includes(worker.category)
 
-export default function WorkersPage() {
+export default function WorkersPageWrapper() {
+  return <Suspense fallback={null}><WorkersPage /></Suspense>
+}
+
+function WorkersPage() {
+  const searchParams = useSearchParams()
   const [workers, setWorkers] = useState([])
   const [workerPhotoUrls, setWorkerPhotoUrls] = useState({})
   const [photoLookupReady, setPhotoLookupReady] = useState(false)
@@ -32,6 +37,7 @@ export default function WorkersPage() {
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const router = useRouter()
+  const supplierFilter = searchParams.get('supplier') || 'all'
 
   useEffect(() => {
     let cancelled = false
@@ -76,7 +82,8 @@ export default function WorkersPage() {
     const matchSearch = !search || (w.full_name || '').toLowerCase().includes(q) || w.worker_number?.toLowerCase().includes(q) || w.trade_role?.toLowerCase().includes(q)
     const matchCat = categoryFilter === 'all' || w.category === categoryFilter
     const matchStatus = statusFilter === 'all' || String(w.status || '').toLowerCase() === statusFilter
-    return matchSearch && matchCat && matchStatus
+    const matchSupplier = supplierFilter === 'all' || w.supplier_id === supplierFilter
+    return matchSearch && matchCat && matchStatus && matchSupplier
   })
 
   const categories = ['Permanent Staff', 'Contract Worker', 'Subcontract Worker', 'Office Staff']
@@ -90,6 +97,13 @@ export default function WorkersPage() {
     <AppShell pageTitle="Workers">
       <PageHeader eyebrow="Workers" title="Worker register" description="All workers — direct employees, contracted hourly, subcontractors, and office staff."
         actions={<button className="btn btn-primary" onClick={handleAddClick}>+ Add Worker</button>} />
+
+      {supplierFilter !== 'all' && (
+        <div style={{background:'#f0fdfa',border:'1px solid #99f6e4',borderRadius:8,padding:'10px 12px',fontSize:12,color:'#0f766e',marginBottom:10,display:'flex',justifyContent:'space-between',alignItems:'center',gap:10}}>
+          <span>Showing workers for one supplier company.</span>
+          <Link href="/workers" className="btn btn-secondary btn-sm">Clear supplier filter</Link>
+        </div>
+      )}
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(5,minmax(0,1fr))',gap:10,marginBottom:4}}>
         {[['All',workers.filter(isActiveWorker).length, workers.filter(isInactiveWorker).length],['Permanent Staff',workers.filter(w=>w.category==='Permanent Staff'&&isActiveWorker(w)).length, workers.filter(w=>w.category==='Permanent Staff'&&isInactiveWorker(w)).length],['Contract',workers.filter(w=>w.category==='Contract Worker'&&isActiveWorker(w)).length, workers.filter(w=>w.category==='Contract Worker'&&isInactiveWorker(w)).length],['Subcontract Worker',workers.filter(w=>w.category==='Subcontract Worker'&&isActiveWorker(w)).length, workers.filter(w=>w.category==='Subcontract Worker'&&isInactiveWorker(w)).length],['Office Staff',workers.filter(w=>w.category==='Office Staff'&&isActiveWorker(w)).length, workers.filter(w=>w.category==='Office Staff'&&isInactiveWorker(w)).length]].map(([label,activeCount,inactiveCount]) => (

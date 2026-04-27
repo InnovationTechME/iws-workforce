@@ -7,12 +7,43 @@ import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
 import { getAllDocumentsWithWorkers, upsertDocument } from '../../lib/documentService'
 import { getVisibleWorkers } from '../../lib/workerService'
-import { uploadWorkerDocument } from '../../lib/storageService'
+import { getSignedUrl, uploadWorkerDocument } from '../../lib/storageService'
 import { DOCUMENT_TYPE_OPTIONS, getDocumentTypeOption, isDocumentExpiryRequired, normalizeDocumentType } from '../../lib/documentTypes'
 import { formatDate, getStatusTone, getDocumentStatus, validateRequired, validateExpiryAfterIssue, validateDateNotPast } from '../../lib/utils'
 
 const CATEGORIES = ['personal','employment','compliance','site','subcontractor','termination']
-const EXPIRY_ONLY_DOCUMENTS = new Set(['passport_copy', 'emirates_id'])
+const HIDE_ISSUE_DATE_DOCUMENTS = new Set(['passport_copy', 'emirates_id'])
+const DOCUMENT_FIELD_CONFIG = {
+  passport_copy: [
+    { key:'passport_number', label:'Passport number', placeholder:'Passport number' },
+    { key:'issuing_country', label:'Nationality / issuing country', placeholder:'Nationality or issuing country' },
+  ],
+  emirates_id: [
+    { key:'eid_number', label:'Emirates ID / National ID number', placeholder:'784-XXXX-XXXXXXX-X' },
+  ],
+  uae_visa: [
+    { key:'visa_number', label:'UAE visa number', placeholder:'101/2026/XXXXXXX' },
+    { key:'visa_type', label:'Visa type', placeholder:'Employment, mission, visit...' },
+    { key:'sponsor', label:'Sponsor / employer', placeholder:'Sponsor name' },
+    { key:'issuing_emirate', label:'Issuing emirate', placeholder:'Dubai, Abu Dhabi...' },
+  ],
+  health_insurance: [
+    { key:'provider', label:'Provider', placeholder:'Daman, Sukoon, etc.' },
+    { key:'policy_number', label:'Policy number', placeholder:'Policy number' },
+    { key:'coverage_type', label:'Coverage type', placeholder:'Basic, enhanced...' },
+  ],
+  workmen_compensation: [
+    { key:'provider', label:'Insurer', placeholder:'Insurance company' },
+    { key:'policy_number', label:'Policy number', placeholder:'Policy number' },
+    { key:'policy_reference', label:'Certificate / page reference', placeholder:'Certificate reference' },
+  ],
+  offer_letter: [
+    { key:'policy_reference', label:'Offer reference', placeholder:'Offer reference' },
+  ],
+  employment_contract: [
+    { key:'policy_reference', label:'Contract reference', placeholder:'Contract / MOHRE reference' },
+  ],
+}
 const CATEGORY_BY_DOC_TYPE = {
   passport_copy: 'personal',
   passport_photo: 'personal',
@@ -45,14 +76,46 @@ function categoryForDocument(docType) {
   return CATEGORY_BY_DOC_TYPE[normalizeDocumentType(docType)] || 'personal'
 }
 
-function isExpiryOnlyDocument(docType) {
-  return EXPIRY_ONLY_DOCUMENTS.has(normalizeDocumentType(docType))
+function hidesIssueDate(docType) {
+  return HIDE_ISSUE_DATE_DOCUMENTS.has(normalizeDocumentType(docType))
+}
+
+function metadataFieldsFor(docType) {
+  return DOCUMENT_FIELD_CONFIG[normalizeDocumentType(docType)] || []
+}
+
+function metadataPayloadFor(docType, source) {
+  const payload = {}
+  metadataFieldsFor(docType).forEach(field => {
+    payload[field.key] = source[field.key] || null
+  })
+  return payload
 }
 
 function statusForDocument(expiryDate, docType, hasFile) {
   if (!hasFile) return 'missing'
   if (!isDocumentExpiryRequired(docType)) return 'valid'
   return getDocumentStatus(expiryDate, docType)
+}
+
+function DocumentMetadataFields({ docType, values, onChange }) {
+  const fields = metadataFieldsFor(docType)
+  if (!fields.length) return null
+  return (
+    <>
+      {fields.map(field => (
+        <div className="form-field" key={field.key}>
+          <label className="form-label">{field.label}</label>
+          <input
+            className="form-input"
+            value={values[field.key] || ''}
+            placeholder={field.placeholder}
+            onChange={e => onChange(field.key, e.target.value)}
+          />
+        </div>
+      ))}
+    </>
+  )
 }
 
 export default function DocumentsPage() {
@@ -67,6 +130,7 @@ export default function DocumentsPage() {
   const [form, setForm] = useState({ worker_id:'', document_category:'personal', document_type:'passport_copy', issue_date:'', expiry_date:'', notes:'', file_blob:null, file_name:null })
   const [selectedDoc, setSelectedDoc] = useState(null)
   const [docDrawerForm, setDocDrawerForm] = useState({ issue_date:'', expiry_date:'', notes:'', file:null })
+  const [signedDocUrl, setSignedDocUrl] = useState(null)
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -155,13 +219,31 @@ export default function DocumentsPage() {
 
   const openDocDrawer = (d) => {
     setSelectedDoc(d)
-    setDocDrawerForm({ issue_date: d.issue_date || '', expiry_date: d.expiry_date || '', notes: d.notes || '', file: null })
+    setSignedDocUrl(null)
+    setDocDrawerForm({
+      issue_date: d.issue_date || '',
+      expiry_date: d.expiry_date || '',
+      notes: d.notes || '',
+      file: null,
+      passport_number: d.passport_number || '',
+      issuing_country: d.issuing_country || '',
+      eid_number: d.eid_number || '',
+      visa_number: d.visa_number || '',
+      visa_type: d.visa_type || '',
+      issuing_emirate: d.issuing_emirate || '',
+      sponsor: d.sponsor || '',
+      policy_number: d.policy_number || '',
+      policy_reference: d.policy_reference || '',
+      provider: d.provider || '',
+      coverage_type: d.coverage_type || '',
+    })
+    getSignedUrl(d.file_url || d.front_file_url || d.back_file_url).then(setSignedDocUrl).catch(() => setSignedDocUrl(null))
   }
 
   const handleSaveDoc = async () => {
     const docType = normalizeDocumentType(selectedDoc.doc_type || selectedDoc.document_type)
     const needsExpiry = isDocumentExpiryRequired(docType)
-    const expiryOnly = isExpiryOnlyDocument(docType)
+    const hideIssue = hidesIssueDate(docType)
     if (needsExpiry && !docDrawerForm.expiry_date) return
     const worker = getWorkerFor(selectedDoc.worker_id)
     try {
@@ -176,11 +258,12 @@ export default function DocumentsPage() {
         label: selectedDoc.label || docType,
         is_blocking: selectedDoc.is_blocking,
         doc_subtype: selectedDoc.document_category || categoryForDocument(docType),
-        issue_date: expiryOnly ? null : docDrawerForm.issue_date || null,
+        issue_date: hideIssue ? null : docDrawerForm.issue_date || null,
         expiry_date: docDrawerForm.expiry_date || null,
         status,
         file_url: fileUrl,
-        notes: docDrawerForm.notes || null
+        notes: docDrawerForm.notes || null,
+        ...metadataPayloadFor(docType, docDrawerForm),
       })
       await reloadDocs()
     } catch (err) { setLoadError(err?.message || 'Failed to save document') }
@@ -190,14 +273,14 @@ export default function DocumentsPage() {
   const handleAdd = async () => {
     const docType = normalizeDocumentType(form.document_type)
     const needsExpiry = isDocumentExpiryRequired(docType)
-    const expiryOnly = isExpiryOnlyDocument(docType)
+    const hideIssue = hidesIssueDate(docType)
     const errors = validateRequired([
       {value: form.worker_id, label:'Worker'},
       {value: form.document_type, label:'Document type'},
       ...(needsExpiry ? [{value: form.expiry_date, label:'Expiry date'}] : []),
     ])
     if (errors.length > 0) { setFormErrors(errors); return }
-    const dateWarn = needsExpiry && !expiryOnly ? validateExpiryAfterIssue(form.issue_date, form.expiry_date) : null
+    const dateWarn = needsExpiry && !hideIssue ? validateExpiryAfterIssue(form.issue_date, form.expiry_date) : null
     const pastWarn = needsExpiry ? validateDateNotPast(form.expiry_date, 'Expiry date') : null
     setFormWarnings([dateWarn, pastWarn].filter(Boolean))
     setFormErrors([])
@@ -214,11 +297,12 @@ export default function DocumentsPage() {
         label: getDocumentTypeOption(docType).label,
         is_blocking: false,
         doc_subtype: form.document_category || categoryForDocument(docType),
-        issue_date: expiryOnly ? null : form.issue_date || null,
+        issue_date: hideIssue ? null : form.issue_date || null,
         expiry_date: form.expiry_date || null,
         status,
         file_url: fileUrl,
-        notes: form.notes || null
+        notes: form.notes || null,
+        ...metadataPayloadFor(docType, form),
       })
       await reloadDocs()
     } catch (err) { setLoadError(err?.message || 'Failed to add document'); return }
@@ -228,7 +312,7 @@ export default function DocumentsPage() {
   }
 
   const formDocType = normalizeDocumentType(form.document_type)
-  const formExpiryOnly = isExpiryOnlyDocument(formDocType)
+  const formHideIssue = hidesIssueDate(formDocType)
 
   return (
     <>
@@ -268,7 +352,7 @@ export default function DocumentsPage() {
                     <td>{(() => { const wi = workerDisplay(d.worker_id); const inactive = getWorkerFor(d.worker_id)?.status === 'inactive'; return <Link href={`/workers/${d.worker_id}`} style={{color:'var(--teal)'}}><div style={{fontWeight:500,display:'flex',alignItems:'center',gap:6}}>{wi.name_primary}{inactive && <span style={{fontSize:10,fontWeight:600,color:'#64748b',background:'#e2e8f0',borderRadius:10,padding:'1px 6px'}}>Inactive</span>}</div><div style={{fontSize:11,color:'var(--hint)'}}>{wi.id_secondary}</div></Link> })()}</td>
                     <td style={{fontWeight:500}}>{d.document_label || titleCase(d.document_type)}</td>
                     <td><StatusBadge label={d.document_category} tone="neutral" /></td>
-                    <td style={{fontSize:12,color:'var(--muted)'}}>{isExpiryOnlyDocument(d.document_type) ? '-' : formatDate(d.issue_date)}</td>
+                    <td style={{fontSize:12,color:'var(--muted)'}}>{hidesIssueDate(d.document_type) ? '-' : formatDate(d.issue_date)}</td>
                     <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(d.expiry_date)}</td>
                     <td><StatusBadge label={d.status} tone={getStatusTone(d.status)} /></td>
                     <td style={{fontSize:12,color:'var(--muted)'}}>{d.notes}</td>
@@ -289,9 +373,14 @@ export default function DocumentsPage() {
             <div className="form-grid">
               <div className="form-field"><label className="form-label">Worker *</label><select className="form-select" value={form.worker_id} onChange={e => setForm({...form,worker_id:e.target.value})}><option value="">Select worker</option>{workers.map(w=><option key={w.id} value={w.id}>{w.full_name} ({w.worker_number})</option>)}</select></div>
               <div className="form-field"><label className="form-label">Category</label><select className="form-select" value={form.document_category} onChange={e => setForm({...form,document_category:e.target.value})}>{CATEGORIES.map(c=><option key={c} value={c}>{titleCase(c)}</option>)}</select></div>
-              <div className="form-field"><label className="form-label">Document type *</label><select className="form-select" value={form.document_type} onChange={e => { const docType = normalizeDocumentType(e.target.value); setForm({...form,document_type:e.target.value,document_category:categoryForDocument(docType),issue_date:isExpiryOnlyDocument(docType) ? '' : form.issue_date}) }}>{DOCUMENT_TYPE_OPTIONS.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}</select></div>
-              {!formExpiryOnly && <div className="form-field"><label className="form-label">Issue date</label><input className="form-input" type="date" value={form.issue_date} onChange={e => setForm({...form,issue_date:e.target.value})} /></div>}
-              <div className="form-field"><label className="form-label">Expiry date{isDocumentExpiryRequired(form.document_type) ? ' *' : ''}</label><input className="form-input" type="date" value={form.expiry_date} onChange={e => setForm({...form,expiry_date:e.target.value})} /></div>
+              <div className="form-field"><label className="form-label">Document type *</label><select className="form-select" value={form.document_type} onChange={e => { const docType = normalizeDocumentType(e.target.value); setForm({...form,document_type:e.target.value,document_category:categoryForDocument(docType),issue_date:hidesIssueDate(docType) ? '' : form.issue_date, expiry_date:isDocumentExpiryRequired(docType) ? form.expiry_date : ''}) }}>{DOCUMENT_TYPE_OPTIONS.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}</select></div>
+              <DocumentMetadataFields docType={form.document_type} values={form} onChange={(key, value) => setForm({...form, [key]: value})} />
+              {!formHideIssue && <div className="form-field"><label className="form-label">{formDocType === 'offer_letter' ? 'Offer date' : 'Issue date'}</label><input className="form-input" type="date" value={form.issue_date} onChange={e => setForm({...form,issue_date:e.target.value})} /></div>}
+              {isDocumentExpiryRequired(form.document_type) ? (
+                <div className="form-field"><label className="form-label">Expiry date *</label><input className="form-input" type="date" value={form.expiry_date} onChange={e => setForm({...form,expiry_date:e.target.value})} /></div>
+              ) : formDocType === 'offer_letter' ? (
+                <div style={{fontSize:12,color:'var(--muted)',alignSelf:'end',paddingBottom:8}}>Offer letters do not expire in the document register. They are valid for 7 days from the offer date.</div>
+              ) : null}
               <div className="form-field"><label className="form-label">Upload file</label><input type="file" className="form-input" accept=".pdf,.jpg,.jpeg,.png,.PDF,.JPG,.JPEG,.PNG" onChange={e => {
                 const file = e.target.files[0]
                 if (!file) return
@@ -327,7 +416,8 @@ export default function DocumentsPage() {
       const days = exp ? Math.ceil((exp - today) / (1000*60*60*24)) : null
       const isContract = selectedDoc.document_type === 'employment_contract'
       const selectedNeedsExpiry = isDocumentExpiryRequired(selectedDoc.document_type)
-      const selectedExpiryOnly = isExpiryOnlyDocument(selectedDoc.document_type)
+      const selectedHideIssue = hidesIssueDate(selectedDoc.document_type)
+      const selectedMetadataFields = metadataFieldsFor(selectedDoc.document_type)
       return (
       <div style={{position:'fixed',inset:0,zIndex:99}} onClick={() => setSelectedDoc(null)}>
         <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0.35)'}} />
@@ -350,8 +440,9 @@ export default function DocumentsPage() {
             <div>
               <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',marginBottom:8}}>Current Info</div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                {!selectedExpiryOnly && <div><div style={{fontSize:11,color:'var(--hint)'}}>Issue date</div><div style={{fontSize:13,fontWeight:500}}>{selectedDoc.issue_date ? formatDate(selectedDoc.issue_date) : 'Not on file'}</div></div>}
-                <div><div style={{fontSize:11,color:'var(--hint)'}}>Expiry date</div><div style={{fontSize:13,fontWeight:500,color:selectedDoc.status==='expired'?'var(--danger)':selectedDoc.status==='expiring_soon'?'var(--warning)':'var(--text)'}}>{selectedDoc.expiry_date ? formatDate(selectedDoc.expiry_date) : 'Not set'}</div></div>
+                {selectedMetadataFields.map(field => selectedDoc[field.key] ? <div key={field.key}><div style={{fontSize:11,color:'var(--hint)'}}>{field.label}</div><div style={{fontSize:13,fontWeight:500}}>{selectedDoc[field.key]}</div></div> : null)}
+                {!selectedHideIssue && <div><div style={{fontSize:11,color:'var(--hint)'}}>{selectedDoc.document_type === 'offer_letter' ? 'Offer date' : 'Issue date'}</div><div style={{fontSize:13,fontWeight:500}}>{selectedDoc.issue_date ? formatDate(selectedDoc.issue_date) : 'Not on file'}</div></div>}
+                {selectedNeedsExpiry && <div><div style={{fontSize:11,color:'var(--hint)'}}>Expiry date</div><div style={{fontSize:13,fontWeight:500,color:selectedDoc.status==='expired'?'var(--danger)':selectedDoc.status==='expiring_soon'?'var(--warning)':'var(--text)'}}>{selectedDoc.expiry_date ? formatDate(selectedDoc.expiry_date) : 'Not set'}</div></div>}
                 <div><div style={{fontSize:11,color:'var(--hint)'}}>Category</div><StatusBadge label={selectedDoc.document_category || 'personal'} tone="neutral" /></div>
                 {selectedDoc.notes && <div style={{gridColumn:'1/-1'}}><div style={{fontSize:11,color:'var(--hint)'}}>Notes</div><div style={{fontSize:12}}>{selectedDoc.notes}</div></div>}
               </div>
@@ -360,6 +451,8 @@ export default function DocumentsPage() {
             {days !== null && days < 0 && <div style={{padding:'8px 12px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:6,fontSize:12,color:'var(--danger)'}}>⚠ Expired {Math.abs(days)} days ago — upload renewal immediately</div>}
             {days !== null && days > 0 && days <= 30 && <div style={{padding:'8px 12px',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:6,fontSize:12,color:'var(--warning)'}}>⏰ Expiring in {days} days — schedule renewal</div>}
             {selectedDoc.status === 'missing' && <div style={{padding:'8px 12px',background:'#f1f5f9',border:'1px solid #cbd5e1',borderRadius:6,fontSize:12,color:'#64748b'}}>📎 No document on file — upload below</div>}
+            {signedDocUrl && <a className="btn btn-secondary" href={signedDocUrl} target="_blank" rel="noopener noreferrer" style={{justifyContent:'center'}}>View current document</a>}
+            {selectedDoc.document_type === 'offer_letter' && <div style={{padding:'8px 12px',background:'#f8fafc',border:'1px solid var(--border)',borderRadius:6,fontSize:12,color:'var(--muted)'}}>Offer letters are not tracked by expiry date here. Use the offer date/reference; operational validity is 7 days.</div>}
 
             {isContract && <div style={{padding:'10px 14px',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:6,fontSize:12,color:'#1e40af'}}>Unlimited Contract — renewal updates visa dates only. No new offer letter required.</div>}
 
@@ -369,14 +462,15 @@ export default function DocumentsPage() {
               </div>
               <div style={{display:'flex',flexDirection:'column',gap:10}}>
                 <div className="form-grid">
-                  {!selectedExpiryOnly && <div className="form-field">
-                    <label className="form-label">{isContract ? 'New contract start date' : 'New issue date'}</label>
+                  <DocumentMetadataFields docType={selectedDoc.document_type} values={docDrawerForm} onChange={(key, value) => setDocDrawerForm(f => ({...f, [key]: value}))} />
+                  {!selectedHideIssue && <div className="form-field">
+                    <label className="form-label">{isContract ? 'New contract start date' : selectedDoc.document_type === 'offer_letter' ? 'Offer date' : 'New issue date'}</label>
                     <input className="form-input" type="date" value={docDrawerForm.issue_date} onChange={e => setDocDrawerForm(f => ({...f, issue_date: e.target.value}))} />
                   </div>}
-                  <div className="form-field">
+                  {selectedNeedsExpiry && <div className="form-field">
                     <label className="form-label">{isContract ? 'New contract end date' : 'New expiry date'}{selectedNeedsExpiry ? ' *' : ''}</label>
                     <input className="form-input" type="date" value={docDrawerForm.expiry_date} onChange={e => setDocDrawerForm(f => ({...f, expiry_date: e.target.value}))} style={selectedNeedsExpiry && !docDrawerForm.expiry_date ? {borderColor:'var(--danger)'} : {}} />
-                  </div>
+                  </div>}
                 </div>
                 <div className="form-field"><label className="form-label">Notes</label><textarea className="form-input" rows={2} value={docDrawerForm.notes} onChange={e => setDocDrawerForm(f => ({...f, notes: e.target.value}))} style={{resize:'vertical'}} /></div>
                 <div className="form-field">

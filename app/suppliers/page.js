@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
@@ -18,20 +19,54 @@ function fmtMonth(year, month) {
 function SupplierCard({ supplier, onEdit }) {
   const [rates, setRates] = useState([])
   const [workerCount, setWorkerCount] = useState(0)
+  const [workers, setWorkers] = useState([])
+  const [showRateForm, setShowRateForm] = useState(false)
+  const [rateForm, setRateForm] = useState({ trade_role:'', hourly_rate:'', effective_from:new Date().toISOString().split('T')[0], notes:'' })
+  const [rateError, setRateError] = useState('')
+
+  const loadSupplierDetail = async () => {
+    const [r, w] = await Promise.all([
+      getSupplierRates(supplier.id),
+      getSupplierWorkers(supplier.id),
+    ])
+    setRates(r || [])
+    setWorkers(w || [])
+    setWorkerCount((w || []).length)
+  }
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const [r, w] = await Promise.all([
-        getSupplierRates(supplier.id),
-        getSupplierWorkers(supplier.id),
-      ])
+      const [r, w] = await Promise.all([getSupplierRates(supplier.id), getSupplierWorkers(supplier.id)])
       if (cancelled) return
       setRates(r || [])
+      setWorkers(w || [])
       setWorkerCount((w || []).length)
     })()
     return () => { cancelled = true }
   }, [supplier.id])
+
+  const handleAddRate = async () => {
+    if (!rateForm.trade_role.trim() || !rateForm.hourly_rate) {
+      setRateError('Trade / role and hourly rate are required')
+      return
+    }
+    setRateError('')
+    const row = await addSupplierRate(
+      supplier.id,
+      rateForm.trade_role.trim(),
+      Number(rateForm.hourly_rate),
+      rateForm.effective_from || new Date().toISOString().split('T')[0],
+      rateForm.notes || null
+    )
+    if (!row?.id) {
+      setRateError('Could not add supplier rate')
+      return
+    }
+    setRateForm({ trade_role:'', hourly_rate:'', effective_from:new Date().toISOString().split('T')[0], notes:'' })
+    setShowRateForm(false)
+    await loadSupplierDetail()
+  }
 
   return (
     <div className="panel" style={{padding:16}}>
@@ -44,7 +79,11 @@ function SupplierCard({ supplier, onEdit }) {
           </div>
           {supplier.trade_speciality && <div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>{supplier.trade_speciality}</div>}
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={() => onEdit(supplier)}>Edit</button>
+        <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
+          <Link className="btn btn-secondary btn-sm" href={`/workers?supplier=${supplier.id}`}>Workers</Link>
+          <Link className="btn btn-secondary btn-sm" href={`/timesheets/grid?supplier=${supplier.id}`}>Timesheets</Link>
+          <button className="btn btn-secondary btn-sm" onClick={() => onEdit(supplier)}>Edit</button>
+        </div>
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:10,fontSize:12,marginBottom:12}}>
@@ -64,7 +103,25 @@ function SupplierCard({ supplier, onEdit }) {
         </div>
       </div>
 
-      {rates.length > 0 && (
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+        <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5}}>Agreed Trade Rates</div>
+        <button className="btn btn-secondary btn-sm" onClick={() => { setRateError(''); setShowRateForm(v => !v) }}>{showRateForm ? 'Cancel rate' : '+ Add rate'}</button>
+      </div>
+
+      {showRateForm && (
+        <div style={{border:'1px solid var(--border)',borderRadius:8,padding:12,marginBottom:10,background:'#f8fafc'}}>
+          {rateError && <div style={{fontSize:12,color:'var(--danger)',marginBottom:8}}>{rateError}</div>}
+          <div className="form-grid">
+            <div className="form-field"><label className="form-label">Trade / role</label><input className="form-input" value={rateForm.trade_role} onChange={e => setRateForm({...rateForm, trade_role:e.target.value})} placeholder="Scaffolder, Rigger, Welder" /></div>
+            <div className="form-field"><label className="form-label">Hourly rate (AED)</label><input className="form-input" type="number" value={rateForm.hourly_rate} onChange={e => setRateForm({...rateForm, hourly_rate:e.target.value})} /></div>
+            <div className="form-field"><label className="form-label">Effective from</label><input className="form-input" type="date" value={rateForm.effective_from} onChange={e => setRateForm({...rateForm, effective_from:e.target.value})} /></div>
+            <div className="form-field"><label className="form-label">Notes</label><input className="form-input" value={rateForm.notes} onChange={e => setRateForm({...rateForm, notes:e.target.value})} /></div>
+          </div>
+          <div style={{display:'flex',justifyContent:'flex-end',marginTop:8}}><button className="btn btn-teal btn-sm" onClick={handleAddRate}>Save rate</button></div>
+        </div>
+      )}
+
+      {rates.length > 0 ? (
         <div className="table-wrap">
           <table>
             <thead><tr><th>Trade / role</th><th>AED / hr</th><th>Effective from</th></tr></thead>
@@ -78,6 +135,20 @@ function SupplierCard({ supplier, onEdit }) {
               ))}
             </tbody>
           </table>
+        </div>
+      ) : (
+        <div style={{fontSize:12,color:'var(--muted)',border:'1px dashed var(--border)',borderRadius:8,padding:12}}>No rates yet. Add at least one agreed trade rate before onboarding workers from this supplier.</div>
+      )}
+
+      {workers.length > 0 && (
+        <div style={{marginTop:12}}>
+          <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6}}>Workers on this supplier</div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {workers.slice(0, 6).map(w => (
+              <Link key={w.id} href={`/workers/${w.id}`} className="btn btn-secondary btn-sm">{w.worker_number} · {w.full_name}</Link>
+            ))}
+            {workers.length > 6 && <Link href={`/workers?supplier=${supplier.id}`} className="btn btn-secondary btn-sm">+{workers.length - 6} more</Link>}
+          </div>
         </div>
       )}
     </div>

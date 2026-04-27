@@ -23,6 +23,7 @@ function TimesheetGridContent() {
   const [month, setMonth] = useState(Number(searchParams.get('month')) || (now.getMonth() + 1))
   const [year, setYear] = useState(Number(searchParams.get('year')) || now.getFullYear())
   const [clientId, setClientId] = useState(searchParams.get('client') || '')
+  const supplierFilter = searchParams.get('supplier') || ''
   const [clients, setClients] = useState([])
   const [workers, setWorkers] = useState([])
   const [holidays, setHolidays] = useState([])
@@ -64,7 +65,9 @@ function TimesheetGridContent() {
     const isInternal = clientId === INNOVATION_INTERNAL_ID
     // Load workers
     let wQuery = supabase.from('workers').select('id, full_name, worker_number, category, rest_day, monthly_salary, hourly_rate, housing_allowance, transport_allowance, food_allowance, other_allowance').eq('status', 'active').order('worker_number')
-    if (isInternal) {
+    if (supplierFilter) {
+      wQuery = wQuery.eq('supplier_id', supplierFilter)
+    } else if (isInternal) {
       wQuery = wQuery.eq('category', 'Permanent Staff')
     } else {
       wQuery = wQuery.not('category', 'eq', 'Office Staff')
@@ -322,6 +325,11 @@ function TimesheetGridContent() {
         <div style={{fontSize:11,fontWeight:600,color:'#0891b2',textTransform:'uppercase',letterSpacing:1,marginBottom:4}}>Master Timesheet Grid</div>
         <h1 style={{fontSize:20,fontWeight:700,color:'#0f172a',margin:0}}>{clientName || 'Select a client'} {clientName ? `\u2014 ${MONTH_NAMES[month-1]} ${year}` : ''}</h1>
       </div>
+      {supplierFilter && (
+        <div style={{background:'#f0fdfa',border:'1px solid #99f6e4',borderRadius:8,padding:'10px 12px',fontSize:12,color:'#0f766e',marginBottom:12}}>
+          Supplier filter is active. The grid is showing only active workers linked to that supplier company.
+        </div>
+      )}
 
       {/* Toolbar */}
       <div style={{display:'flex',flexWrap:'wrap',gap:10,alignItems:'center',marginBottom:16,background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,padding:'10px 14px'}}>
