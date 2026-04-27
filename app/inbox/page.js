@@ -231,15 +231,16 @@ export default function InboxPage() {
     closeDrawer()
   }
 
-  const total = Object.values(inbox).reduce((s,a) => s + a.length, 0)
+  const safeInbox = normaliseInbox(inbox)
+  const total = Object.values(safeInbox).reduce((s,a) => s + a.length, 0)
 
   // Wire action links to open drawer
-  const missingDocs = inbox.missingDocs.map(d => ({...d, _action: () => openDocDrawer(d.worker_id, d.document_type)}))
-  const expiredDocs = inbox.expiredDocs.map(d => ({...d, _action: () => openDocDrawer(d.worker_id, d.document_type)}))
-  const expiringDocs = inbox.expiringDocs.map(d => ({...d, _action: () => openDocDrawer(d.worker_id, d.document_type)}))
-  const contractsDue = inbox.contractsDue.map(d => ({...d, _action: () => openDocDrawer(d.worker_id, 'employment_contract', { issue_date: todayStr(), expiry_date: twoYearsFromStr(todayStr()) })}))
-  const expiredCerts = inbox.expiredCerts.map(c => ({...c, _action: () => openCertDrawer(c.worker_id, c.certification_type)}))
-  const expiringCerts = inbox.expiringCerts.map(c => ({...c, _action: () => openCertDrawer(c.worker_id, c.certification_type)}))
+  const missingDocs = safeInbox.missingDocs.map(d => ({...d, _action: () => openDocDrawer(d.worker_id, d.document_type)}))
+  const expiredDocs = safeInbox.expiredDocs.map(d => ({...d, _action: () => openDocDrawer(d.worker_id, d.document_type)}))
+  const expiringDocs = safeInbox.expiringDocs.map(d => ({...d, _action: () => openDocDrawer(d.worker_id, d.document_type)}))
+  const contractsDue = safeInbox.contractsDue.map(d => ({...d, _action: () => openDocDrawer(d.worker_id, 'employment_contract', { issue_date: todayStr(), expiry_date: twoYearsFromStr(todayStr()) })}))
+  const expiredCerts = safeInbox.expiredCerts.map(c => ({...c, _action: () => openCertDrawer(c.worker_id, c.certification_type)}))
+  const expiringCerts = safeInbox.expiringCerts.map(c => ({...c, _action: () => openCertDrawer(c.worker_id, c.certification_type)}))
 
   const isContract = drawerRecord?.document_type === 'employment_contract'
   const days = drawerRecord ? daysFromNow(drawerRecord.expiry_date) : null
@@ -261,9 +262,9 @@ export default function InboxPage() {
         <InboxPanel title="Contracts due" items={contractsDue} tone="warning" linkHref="/documents" renderItem={d => <><div style={{flex:1}}><div style={{fontSize:12,fontWeight:500}}>{d.worker_name}</div><div style={{fontSize:10,color:'var(--hint)'}}>{d.worker_number} · contract renewal</div><div style={{fontSize:10,color:'var(--warning)',marginTop:2}}>📋 Renew contract →</div></div></>} />
         <InboxPanel title="Expired certifications" items={expiredCerts} tone="danger" linkHref="/certifications" renderItem={c => <><div style={{flex:1}}><div style={{fontSize:12,fontWeight:500}}>{c.worker_name}</div><div style={{fontSize:10,color:'var(--hint)'}}>{c.worker_number} · {c.certification_type}</div><div style={{fontSize:10,color:'var(--danger)',marginTop:2}}>🔄 Upload new certificate →</div></div><StatusBadge label="expired" tone="danger" /></>} />
         <InboxPanel title="Expiring certifications" items={expiringCerts} tone="warning" linkHref="/certifications" renderItem={c => <><div style={{flex:1}}><div style={{fontSize:12,fontWeight:500}}>{c.worker_name}</div><div style={{fontSize:10,color:'var(--hint)'}}>{c.worker_number} · {c.certification_type}</div><div style={{fontSize:10,color:'var(--warning)',marginTop:2}}>⏰ Renew certificate →</div></div></>} />
-        <InboxPanel title="Open warnings" items={inbox.openWarnings} tone="danger" linkHref="/warnings" renderItem={w => <><div style={{flex:1}}><div style={{fontSize:12,fontWeight:500}}>{w.worker_name}</div><div style={{fontSize:10,color:'var(--hint)'}}>{w.worker_number} · {w.warning_type}</div></div><StatusBadge label="open" tone="danger" /></>} />
-        <InboxPanel title="Pending timesheets" items={inbox.pendingTimesheets} tone="warning" linkHref="/timesheets" renderItem={t => <><span className="label">{t.client_name} · {t.job_no}</span><StatusBadge label={t.final_approval_status} tone="warning" /></>} />
-        <InboxPanel title="Leave requests" items={inbox.leaveRequests} tone="warning" linkHref="/leave" renderItem={l => <><div style={{flex:1}}><div style={{fontSize:12,fontWeight:500}}>{l.worker_name}</div><div style={{fontSize:10,color:'var(--hint)'}}>{l.worker_number} · {l.leave_type} · {l.days_count} days</div>{l.leave_type==='sick'&&<div style={{fontSize:10,color:'var(--warning)',marginTop:2}}>⚠ Verify certificate before approving</div>}</div><StatusBadge label="pending" tone="warning" /></>} />
+        <InboxPanel title="Open warnings" items={safeInbox.openWarnings} tone="danger" linkHref="/warnings" renderItem={w => <><div style={{flex:1}}><div style={{fontSize:12,fontWeight:500}}>{w.worker_name}</div><div style={{fontSize:10,color:'var(--hint)'}}>{w.worker_number} · {w.warning_type}</div></div><StatusBadge label="open" tone="danger" /></>} />
+        <InboxPanel title="Pending timesheets" items={safeInbox.pendingTimesheets} tone="warning" linkHref="/timesheets" renderItem={t => <><span className="label">{t.client_name} · {t.job_no}</span><StatusBadge label={t.final_approval_status} tone="warning" /></>} />
+        <InboxPanel title="Leave requests" items={safeInbox.leaveRequests} tone="warning" linkHref="/leave" renderItem={l => <><div style={{flex:1}}><div style={{fontSize:12,fontWeight:500}}>{l.worker_name}</div><div style={{fontSize:10,color:'var(--hint)'}}>{l.worker_number} · {l.leave_type} · {l.days_count} days</div>{l.leave_type==='sick'&&<div style={{fontSize:10,color:'var(--warning)',marginTop:2}}>⚠ Verify certificate before approving</div>}</div><StatusBadge label="pending" tone="warning" /></>} />
         <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,padding:'12px 14px'}}>
           <div style={{fontSize:11,fontWeight:700,color:'#0f172a',textTransform:'uppercase',letterSpacing:0.5,marginBottom:8}}>Sick Leave Certificate Verification</div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:6}}>

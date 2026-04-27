@@ -99,10 +99,17 @@ export default function SuppliersPage() {
 
   const refresh = async () => {
     setLoading(true)
-    const [s, sm] = await Promise.all([getSuppliers(), getAllSupplierSummaries()])
-    setSuppliers(s || [])
-    setSummaries(sm || [])
-    setLoading(false)
+    try {
+      const [s, sm] = await Promise.all([getSuppliers(), getAllSupplierSummaries()])
+      setSuppliers(s || [])
+      setSummaries(sm || [])
+    } catch (err) {
+      console.error('Failed to load suppliers', err)
+      setSuppliers([])
+      setSummaries([])
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { refresh() }, [])
