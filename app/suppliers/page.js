@@ -80,6 +80,7 @@ function SupplierCard({ supplier, onEdit }) {
           {supplier.trade_speciality && <div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>{supplier.trade_speciality}</div>}
         </div>
         <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
+          <Link className="btn btn-secondary btn-sm" href={`/suppliers/${supplier.id}`}>Profile</Link>
           <Link className="btn btn-secondary btn-sm" href={`/workers?supplier=${supplier.id}`}>Workers</Link>
           <Link className="btn btn-secondary btn-sm" href={`/timesheets/grid?supplier=${supplier.id}`}>Timesheets</Link>
           <button className="btn btn-secondary btn-sm" onClick={() => onEdit(supplier)}>Edit</button>

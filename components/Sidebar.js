@@ -5,8 +5,9 @@ import { usePathname } from 'next/navigation'
 import { getRole, canAccess } from '../lib/mockAuth'
 
 const navSections = [
-  { title:null, items:[
+  { title:'MAIN', items:[
     { href:'/dashboard', label:'Dashboard', module:'dashboard' },
+    { href:'/reports', label:'Reports & Stats', module:'reports' },
   ]},
   { title:'WORKER LIFECYCLE', items:[
     { href:'/offers', label:'Offers', module:'offers' },
@@ -16,7 +17,8 @@ const navSections = [
     { href:'/offboarding-exit', label:'Offboarding', module:'offboarding-exit' },
     { href:'/blacklist', label:'Blacklist', module:'blacklist' },
   ]},
-  { title:'COMPLIANCE & DOCUMENTS', items:[
+  { title:'RECORDS & COMPLIANCE', items:[
+    { href:'/records', label:'Records & Templates', module:'records' },
     { href:'/documents', label:'Documents', module:'documents' },
     { href:'/certifications', label:'Certifications', module:'certifications' },
     { href:'/packs', label:'Document Packs', module:'packs' },
@@ -43,10 +45,21 @@ export default function Sidebar({ alertDots = {} }) {
   const pathname = usePathname()
   const [role, setRoleState] = useState('owner')
   const [mounted, setMounted] = useState(false)
+  const [openSections, setOpenSections] = useState({})
 
   useEffect(() => { setMounted(true); setRoleState(getRole()) }, [])
+  useEffect(() => {
+    setOpenSections(prev => {
+      const next = { ...prev }
+      navSections.forEach((section, index) => {
+        const isActiveSection = section.items.some(item => pathname === item.href || pathname.startsWith(item.href + '/'))
+        if (isActiveSection || next[index] === undefined) next[index] = isActiveSection || index === 0
+      })
+      return next
+    })
+  }, [pathname])
 
-  const roleLabel = role === 'owner' ? 'Management' : role === 'hr_admin' ? 'HR Admin' : 'Operations'
+  const roleLabel = role === 'owner' ? 'Management' : role === 'hr_admin' ? 'HR Admin' : role === 'accounts' ? 'Accounts' : 'Operations'
 
   return (
     <aside className="sidebar">
@@ -63,8 +76,17 @@ export default function Sidebar({ alertDots = {} }) {
       <nav className="nav-section" style={{padding:'4px 8px'}}>
         {navSections.map((section, si) => (
           <div key={si} style={{marginBottom:section.title ? 12 : 4}}>
-            {section.title && <div style={{fontSize:9,fontWeight:700,color:'var(--hint)',textTransform:'uppercase',letterSpacing:'0.8px',padding:'8px 10px 4px',marginTop:si>0?4:0}}>{section.title}</div>}
-            {section.items.filter(item => !mounted || canAccess(item.module)).map(item => {
+            {section.title && (
+              <button
+                type="button"
+                onClick={() => setOpenSections(prev => ({ ...prev, [si]: !prev[si] }))}
+                style={{width:'100%',border:0,background:'transparent',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:9,fontWeight:700,color:'var(--hint)',textTransform:'uppercase',letterSpacing:'0.8px',padding:'8px 10px 4px',marginTop:si>0?4:0,cursor:'pointer'}}
+              >
+                <span>{section.title}</span>
+                <span>{openSections[si] ? 'v' : '>'}</span>
+              </button>
+            )}
+            {openSections[si] && section.items.filter(item => !mounted || canAccess(item.module)).map(item => {
               const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
               const dot = alertDots[item.module] || 'neutral'
               return (
