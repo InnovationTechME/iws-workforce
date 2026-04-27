@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "data:audit": "node scripts/auditDemoData.mjs",
+    "data:seed-demo": "node scripts/seedDemoLifecycle.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.0",
