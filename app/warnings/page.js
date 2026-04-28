@@ -4,11 +4,22 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { addWarning, updateWarning, getVisibleWorkers, addPenaltyDeduction, makeId, getNextWarningType, generateRefNumber, addLetter, getWorker, getWorkerWarningLevel } from '../../lib/mockStore'
-import { getAllWarnings } from '../../lib/warningService'
-import { formatDate, getStatusTone, TODAY } from '../../lib/utils'
+import { getVisibleWorkers } from '../../lib/workerService'
+import { getAllWarnings, addWarning, updateWarning } from '../../lib/warningService'
+import { addLetter, generateRefNumber } from '../../lib/letterService'
+import { formatDate, getStatusTone } from '../../lib/utils'
 import { warningLetterHTML } from '../../lib/letterTemplates'
 import LetterViewer from '../../components/LetterViewer'
+
+function nextWarningType(rows, workerId) {
+  const count = (rows || []).filter(row =>
+    row.worker_id === workerId &&
+    String(row.warning_type || '').toLowerCase() === 'warning'
+  ).length
+  if (count === 0) return 'warning_1st'
+  if (count === 1) return 'warning_2nd'
+  return 'warning_final'
+}
 
 export default function WarningsPage() {
   const [warnings, setWarnings] = useState([])
@@ -17,7 +28,7 @@ export default function WarningsPage() {
   const [selected, setSelected] = useState(null)
   const [showDrawer, setShowDrawer] = useState(false)
   const [formErrors, setFormErrors] = useState([])
-  const [form, setForm] = useState({ worker_id:'', warning_type:'warning', issue_date:'2026-04-08', reason:'', issued_by:'', status:'open', notes:'', penalty_amount:'', penalty_type:'' })
+  const [form, setForm] = useState({ worker_id:'', warning_type:'warning', issue_date:new Date().toISOString().split('T')[0], reason:'', issued_by:'', status:'open', notes:'', penalty_amount:'', penalty_type:'' })
   const [viewerHtml, setViewerHtml] = useState(null)
   const [viewerRef, setViewerRef] = useState('')
 
@@ -25,7 +36,7 @@ export default function WarningsPage() {
   const [loadError, setLoadError] = useState(null)
 
   const reloadWarnings = async () => {
-    setWorkers(getVisibleWorkers())
+    setWorkers(await getVisibleWorkers())
     const rows = await getAllWarnings()
     setWarnings(rows || [])
   }
@@ -49,29 +60,27 @@ export default function WarningsPage() {
   const filtered = filter === 'all' ? warnings : warnings.filter(w => w.status === filter)
 
   const handleAdd = async () => {
+    if (!form.worker_id) { setFormErrors(['Worker is required']); return }
     if (!form.reason || !form.reason.trim()) { setFormErrors(['Reason is required']); return }
     setFormErrors([])
-    const worker = workers.find(w => w.id === form.worker_id)
-    const newWarningId = makeId('wm')
-    addWarning({ ...form, id: newWarningId, worker_name: worker?.full_name || '', worker_number: worker?.worker_number || '' })
-    if (form.penalty_amount && form.penalty_type) {
-      addPenaltyDeduction({
-        id: makeId('pd'),
-        warning_id: newWarningId,
+    const level = form.warning_type === 'memo' ? 'warning_1st' : nextWarningType(warnings, form.worker_id)
+    try {
+      await addWarning({
+        ref_number: generateRefNumber(level),
         worker_id: form.worker_id,
-        worker_name: worker?.full_name || '',
-        worker_number: worker?.worker_number || '',
-        label: `Warning penalty — ${form.reason?.slice(0,40)}`,
-        amount: Number(form.penalty_amount),
-        type: form.penalty_type,
-        status: 'pending_hr_confirmation',
-        created_at: TODAY
+        warning_type: form.warning_type,
+        level,
+        reason: form.reason.trim(),
+        issued_by: form.issued_by || 'HR Admin',
+        issue_date: form.issue_date,
+        penalty_amount: form.penalty_amount ? Number(form.penalty_amount) : null,
+        penalty_type: form.penalty_type || null,
+        status: form.status || 'open',
       })
-    }
-    try { await reloadWarnings() } catch (err) { setLoadError(err?.message || 'Failed to refresh warnings') }
+      await reloadWarnings()
+    } catch (err) { setLoadError(err?.message || 'Failed to create warning') }
     setShowDrawer(false)
   }
-
   return (
     <>
     <AppShell pageTitle="Warnings">
@@ -117,17 +126,17 @@ export default function WarningsPage() {
                 <div key={label} className="metric-row"><span className="label">{label}</span><span className="value" style={{maxWidth:200,textAlign:'right',fontSize:12}}>{value}</span></div>
               ))}
               <div style={{display:'flex',gap:6,marginTop:8}}>
-                {selected.status === 'open' && <button className="btn btn-secondary btn-sm" onClick={async () => { updateWarning(selected.id,{status:'monitoring'}); await reloadWarnings(); setSelected({...selected,status:'monitoring'}) }}>→ Monitoring</button>}
-                {selected.status !== 'closed' && <button className="btn btn-ghost btn-sm" onClick={async () => { updateWarning(selected.id,{status:'closed'}); await reloadWarnings(); setSelected({...selected,status:'closed'}) }}>Close record</button>}
+                {selected.status === 'open' && <button className="btn btn-secondary btn-sm" onClick={async () => { await updateWarning(selected.id,{status:'monitoring'}); await reloadWarnings(); setSelected({...selected,status:'monitoring'}) }}>→ Monitoring</button>}
+                {selected.status !== 'closed' && <button className="btn btn-ghost btn-sm" onClick={async () => { await updateWarning(selected.id,{status:'closed'}); await reloadWarnings(); setSelected({...selected,status:'closed'}) }}>Close record</button>}
               </div>
-              <button className="btn btn-teal btn-sm" style={{marginTop:8}} onClick={() => {
-                const worker = getWorker(selected.worker_id)
+              <button className="btn btn-teal btn-sm" style={{marginTop:8}} onClick={async () => {
+                const worker = workers.find(w => w.id === selected.worker_id)
                 if (!worker) return
-                const nextType = getNextWarningType(selected.worker_id)
+                const nextType = selected.level || nextWarningType(warnings, selected.worker_id)
                 const ref = generateRefNumber(nextType)
                 const today = new Date().toISOString().split('T')[0]
                 const html = warningLetterHTML(worker, selected, ref, today, nextType, 'english')
-                addLetter({ id: makeId('let'), ref_number: ref, letter_type: nextType, worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language:'english', issued_date: today, issued_by:'HR Admin', linked_record_id: selected.id, status:'issued', notes:'' })
+                await addLetter({ ref_number: ref, letter_type: nextType, worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language:'english', issued_date: today, issued_by:'HR Admin', linked_record_id: selected.id, status:'issued', notes:selected.reason || '' })
                 setViewerHtml(html); setViewerRef(ref)
               }}>📄 Generate Warning Letter</button>
             </div>

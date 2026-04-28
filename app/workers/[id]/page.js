@@ -7,9 +7,11 @@ import PageHeader from '../../../components/PageHeader'
 import StatusBadge from '../../../components/StatusBadge'
 import LetterViewer from '../../../components/LetterViewer'
 import WorkerAvatar from '../../../components/WorkerAvatar'
-import { getCertificationsByWorker, getWarningsByWorker, getLeaveByWorker, getLettersByWorker, getNextWarningType, generateRefNumber, addLetter, getWarnings, getWorkerWarningLevel, makeId, getOffboardingByWorker, OFFBOARDING_ITEMS, calculateLeaveBalance, getILOEStatus, updateDocument, generateDocFileName } from '../../../lib/mockStore'
+import { getCertificationsByWorker, getLeaveByWorker, getWorkerWarningLevel, getOffboardingByWorker, OFFBOARDING_ITEMS, calculateLeaveBalance, getILOEStatus, updateDocument, generateDocFileName } from '../../../lib/mockStore'
 import { getWorkerById } from '../../../lib/workerService'
 import { getDocumentsByWorker, upsertDocument } from '../../../lib/documentService'
+import { getWarningsByWorker } from '../../../lib/warningService'
+import { getLettersByWorker, addLetter, generateRefNumber } from '../../../lib/letterService'
 import { getDocumentTemplate, generateDocumentFilename } from '../../../lib/documentRegister'
 import DocumentUploadForm from '../../../components/DocumentUploadForm'
 import WorkExperienceSection from '../../../components/WorkExperienceSection'
@@ -19,6 +21,13 @@ import { getAttendanceByWorker } from '../../../lib/attendanceService'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
 import { offerLetterHTML, warningLetterHTML, experienceLetterHTML, terminationWithNoticeHTML, terminationWithoutNoticeHTML, resignationAcceptanceHTML, policyManualHTML, TERMINATION_GROUNDS_LIST } from '../../../lib/letterTemplates'
 import { buildWaLink, starterKey } from '../../../lib/whatsappTemplates'
+
+function nextWarningTypeFromRows(rows = []) {
+  const count = rows.filter(row => String(row.warning_type || '').toLowerCase() === 'warning').length
+  if (count === 0) return 'warning_1st'
+  if (count === 1) return 'warning_2nd'
+  return 'warning_final'
+}
 
 export default function WorkerDetailPage() {
   const { id } = useParams()
@@ -76,8 +85,8 @@ export default function WorkerDetailPage() {
           try { setDocs(await getDocumentsByWorker(id)) } catch (e) { console.error(e); setDocs([]) }
           try { setAttendance(await getAttendanceByWorker(id)) } catch (e) { setAttendance([]) }
           setCerts(getCertificationsByWorker(id))
-          setWarnings(getWarningsByWorker(id))
-          setLetters(getLettersByWorker(id))
+          try { setWarnings(await getWarningsByWorker(id)) } catch (e) { console.error(e); setWarnings([]) }
+          try { setLetters(await getLettersByWorker(id)) } catch (e) { console.error(e); setLetters([]) }
         }
       } catch (err) {
         if (!cancelled) setLoadError(err?.message || 'Failed to load worker')
@@ -131,6 +140,10 @@ export default function WorkerDetailPage() {
   const expiredCerts = certs.filter(c => c.status === 'expired').length
   const warningLevel = getWorkerWarningLevel(id)
   const activeWarnings = warnings.filter(w => w.status === 'open').length
+  const recordLetter = async (letter) => {
+    await addLetter(letter)
+    setLetters(await getLettersByWorker(worker.id))
+  }
 
   const tenureText = (() => {
     if (!worker.joining_date) return '—'
@@ -696,40 +709,35 @@ export default function WorkerDetailPage() {
                 <option value="english">English</option>
                 <option value="hindi">English + Hindi</option>
               </select>
-              <button className="btn btn-teal btn-sm" onClick={() => {
+              <button className="btn btn-teal btn-sm" onClick={async () => {
                 const ref = generateRefNumber('offer_letter')
                 const today = new Date().toISOString().split('T')[0]
                 const offerData = { ...worker, trade_role: worker.trade_role, employment_type: worker.category, pay_type: worker.pay_type || 'monthly', base_salary_or_rate: worker.monthly_salary || worker.hourly_rate || 0, housing_allowance: worker.housing_allowance || 0, transport_allowance: worker.transport_allowance || 0, food_allowance: worker.food_allowance || 0, start_date: worker.joining_date || '', nationality: worker.nationality || '', passport_number: worker.passport_number || '' }
                 const html = offerLetterHTML(worker, offerData, ref, today, letterLang)
-                addLetter({ id: makeId('let'), ref_number: ref, letter_type:'offer_letter', worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language: letterLang, issued_date: today, issued_by:'HR Admin', linked_record_id:null, status:'issued', notes:'' })
-                setLetters(getLettersByWorker(worker.id))
+                await recordLetter({ ref_number: ref, letter_type:'offer_letter', worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language: letterLang, issued_date: today, issued_by:'HR Admin', linked_record_id:null, status:'issued', notes:'' })
                 setViewerHtml(html); setViewerRef(ref)
               }}>+ Offer Letter</button>
-              <button className="btn btn-secondary btn-sm" style={{borderColor:'var(--warning)',color:'var(--warning)'}} onClick={() => {
-                const nextType = getNextWarningType(worker.id)
+              <button className="btn btn-secondary btn-sm" style={{borderColor:'var(--warning)',color:'var(--warning)'}} onClick={async () => {
+                const nextType = nextWarningTypeFromRows(warnings)
                 const ref = generateRefNumber(nextType)
                 const today = new Date().toISOString().split('T')[0]
-                const allWarnings = getWarnings().filter(w => w.worker_id === worker.id)
-                const latestWarning = allWarnings[allWarnings.length - 1] || { reason:'Disciplinary matter', issue_date: today, issued_by:'HR Admin', penalty_amount:'', penalty_type:'' }
+                const latestWarning = warnings[0] || { reason:'Disciplinary matter', issue_date: today, issued_by:'HR Admin', penalty_amount:'', penalty_type:'' }
                 const html = warningLetterHTML(worker, latestWarning, ref, today, nextType, letterLang)
-                addLetter({ id: makeId('let'), ref_number: ref, letter_type: nextType, worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language: letterLang, issued_date: today, issued_by:'HR Admin', linked_record_id: latestWarning.id || null, status:'issued', notes:'' })
-                setLetters(getLettersByWorker(worker.id))
+                await recordLetter({ ref_number: ref, letter_type: nextType, worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language: letterLang, issued_date: today, issued_by:'HR Admin', linked_record_id: latestWarning.id || null, status:'issued', notes:latestWarning.reason || '' })
                 setViewerHtml(html); setViewerRef(ref)
               }}>+ Warning Letter (auto-level)</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => {
+              <button className="btn btn-secondary btn-sm" onClick={async () => {
                 const ref = generateRefNumber('experience_letter')
                 const today = new Date().toISOString().split('T')[0]
                 const html = experienceLetterHTML(worker, ref, today, letterLang)
-                addLetter({ id: makeId('let'), ref_number: ref, letter_type:'experience_letter', worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language: letterLang, issued_date: today, issued_by:'HR Admin', linked_record_id:null, status:'issued', notes:'' })
-                setLetters(getLettersByWorker(worker.id))
+                await recordLetter({ ref_number: ref, letter_type:'experience_letter', worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language: letterLang, issued_date: today, issued_by:'HR Admin', linked_record_id:null, status:'issued', notes:'' })
                 setViewerHtml(html); setViewerRef(ref)
               }}>+ Experience Letter</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => {
+              <button className="btn btn-secondary btn-sm" onClick={async () => {
                 const ref = generateRefNumber('policy_manual')
                 const today = new Date().toISOString().split('T')[0]
                 const html = policyManualHTML(worker, ref, today)
-                addLetter({ id: makeId('let'), ref_number: ref, letter_type:'policy_manual', worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language:'english', issued_date: today, issued_by:'HR Admin', linked_record_id:null, status:'issued', notes:'' })
-                setLetters(getLettersByWorker(worker.id))
+                await recordLetter({ ref_number: ref, letter_type:'policy_manual', worker_id: worker.id, worker_name: worker.full_name, worker_number: worker.worker_number, language:'english', issued_date: today, issued_by:'HR Admin', linked_record_id:null, status:'issued', notes:'' })
                 setViewerHtml(html); setViewerRef(ref)
               }}>+ Policy Manual</button>
             </div>
@@ -754,7 +762,7 @@ export default function WorkerDetailPage() {
                   </div>
                   <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:12}}>
                     <button className="btn btn-secondary" onClick={() => setShowTerminationForm(false)}>Cancel</button>
-                    <button style={{background:terminationType==='resignation'?'#16a34a':'#dc2626',color:'white',border:'none',borderRadius:6,padding:'8px 18px',fontSize:13,fontWeight:600,cursor:'pointer'}} onClick={() => {
+                    <button style={{background:terminationType==='resignation'?'#16a34a':'#dc2626',color:'white',border:'none',borderRadius:6,padding:'8px 18px',fontSize:13,fontWeight:600,cursor:'pointer'}} onClick={async () => {
                       try {
                         const typeMap = {notice:'termination_notice',no_notice:'termination_no_notice',resignation:'resignation_acceptance'}
                         const letterType = typeMap[terminationType]
@@ -764,8 +772,7 @@ export default function WorkerDetailPage() {
                         if (terminationType==='notice') html = terminationWithNoticeHTML(worker,terminationDetails,ref,today,letterLang)
                         else if (terminationType==='no_notice') html = terminationWithoutNoticeHTML(worker,terminationDetails,ref,today,letterLang)
                         else html = resignationAcceptanceHTML(worker,terminationDetails,ref,today,letterLang)
-                        addLetter({id:makeId('let'),ref_number:ref,letter_type:letterType,worker_id:worker.id,worker_name:worker.full_name,worker_number:worker.worker_number,language:letterLang,issued_date:today,issued_by:'HR Admin',linked_record_id:null,status:'issued',notes:terminationType==='no_notice'?TERMINATION_GROUNDS_LIST[terminationDetails.ground_key]?.label:''})
-                        setLetters(getLettersByWorker(worker.id))
+                        await recordLetter({ref_number:ref,letter_type:letterType,worker_id:worker.id,worker_name:worker.full_name,worker_number:worker.worker_number,language:letterLang,issued_date:today,issued_by:'HR Admin',linked_record_id:null,status:'issued',notes:terminationType==='no_notice'?TERMINATION_GROUNDS_LIST[terminationDetails.ground_key]?.label:''})
                         setViewerHtml(html); setViewerRef(ref); setShowTerminationForm(false)
                       } catch(e) { setSaveBanner('Error: ' + e.message); setTimeout(() => setSaveBanner(null), 4000) }
                     }}>Generate & Preview Letter</button>
@@ -798,7 +805,7 @@ export default function WorkerDetailPage() {
                               let html = ''
                               if (l.letter_type === 'offer_letter') html = offerLetterHTML(worker, worker, l.ref_number, l.issued_date, l.language)
                               else if (['warning_1st','warning_2nd','warning_final'].includes(l.letter_type)) {
-                                const w = getWarnings().find(w => w.id === l.linked_record_id) || { reason:'On record', issue_date: l.issued_date, issued_by: l.issued_by, penalty_amount:'', penalty_type:'' }
+                                const w = warnings.find(w => w.id === l.linked_record_id) || { reason:'On record', issue_date: l.issued_date, issued_by: l.issued_by, penalty_amount:'', penalty_type:'' }
                                 html = warningLetterHTML(worker, w, l.ref_number, l.issued_date, l.letter_type, l.language)
                               }
                               else if (l.letter_type === 'experience_letter') html = experienceLetterHTML(worker, l.ref_number, l.issued_date, l.language)
