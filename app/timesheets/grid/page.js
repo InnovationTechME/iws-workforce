@@ -5,11 +5,21 @@ import AppShell from '../../../components/AppShell'
 import { supabase } from '../../../lib/supabaseClient'
 import { classifyDay, getHolidayName, daysInMonth, formatDateStr } from '../../../lib/dateUtils'
 import { splitHours, detectConflict, capHours } from '../../../lib/timesheetGridLogic'
-import { parseClientTimesheet, matchWorkerToIWS } from '../../../lib/excelParser'
+import { parseClientTimesheet, matchWorkerToIWS, validateTimesheetMonth } from '../../../lib/excelParser'
 import { getRole } from '../../../lib/mockAuth'
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const DAY_LETTERS = ['Su','Mo','Tu','We','Th','Fr','Sa']
+const NOTE_STATUS_MAP = {
+  absent_no_cert: { absence_status: 'conflict' },
+  sick_with_cert: { absence_status: 'sick_certified' },
+  sick_cert_query: { absence_status: 'conflict', absence_note: 'Sick certificate to verify' },
+  leave: { absence_status: 'approved_leave', approved_leave_type: 'annual' },
+  id_renewal: { absence_status: 'short_day_authorised', absence_note: 'ID renewal' },
+  not_working: { absence_status: 'short_day_authorised', absence_note: 'Not working per imported sheet' },
+  day_off: null,
+  rest_day: null,
+}
 
 const INNOVATION_INTERNAL_ID = 'b970a080-59aa-440c-aff0-27f9b4d7610c'
 
@@ -37,6 +47,8 @@ function TimesheetGridContent() {
   const [sickRefInput, setSickRefInput] = useState('')
   const [showSickModal, setShowSickModal] = useState(null)
   const [uploadResult, setUploadResult] = useState(null)
+  const [pendingImport, setPendingImport] = useState(null)
+  const [importApplying, setImportApplying] = useState(false)
   const [locked, setLocked] = useState(false)
   const debounceTimers = useRef({})
   const numDays = daysInMonth(month, year)
@@ -109,28 +121,36 @@ function TimesheetGridContent() {
     setLoading(false)
   }
 
-  // Debounced auto-save
-  const saveCell = useCallback(async (workerId, day, value) => {
-    if (!header || locked) return
-    const worker = workers.find(w => w.id === workerId)
-    if (!worker) return
+  const buildLineRow = useCallback((worker, day, value, extra = {}) => {
     const dateStr = formatDateStr(day, month, year)
     const dayType = classifyDay(dateStr, worker.rest_day || 'sunday', holidays)
     const capped = capHours(value)
     const { normal_hours, ot_hours, holiday_hours } = splitHours(capped, dayType, ramadanMode)
     const isConflict = detectConflict(capped, dayType)
 
-    const key = `${workerId}_${day}`
-    setCellStates(prev => ({ ...prev, [key]: 'saving' }))
-
-    const row = {
-      worker_id: workerId, header_id: header.id, work_date: dateStr,
+    return {
+      worker_id: worker.id, header_id: header.id, work_date: dateStr,
       total_hours: capped, normal_hours, ot_hours, holiday_hours,
       is_friday: new Date(dateStr + 'T00:00:00').getDay() === 5,
       is_rest_day: dayType === 'rest_day',
       is_public_holiday: dayType === 'public_holiday',
-      absence_status: isConflict ? 'conflict' : null
+      absence_status: isConflict ? 'conflict' : null,
+      sick_cert_reference: null,
+      approved_leave_type: null,
+      absence_note: null,
+      ...extra,
     }
+  }, [header, holidays, month, ramadanMode, year])
+
+  // Debounced auto-save
+  const saveCell = useCallback(async (workerId, day, value, extra = {}) => {
+    if (!header || locked) return
+    const worker = workers.find(w => w.id === workerId)
+    if (!worker) return
+    const key = `${workerId}_${day}`
+    setCellStates(prev => ({ ...prev, [key]: 'saving' }))
+
+    const row = buildLineRow(worker, day, value, extra)
     const { error } = await supabase.from('timesheet_lines').upsert(row, { onConflict: 'worker_id,work_date,header_id' })
     if (error) {
       setCellStates(prev => ({ ...prev, [key]: 'error' }))
@@ -139,7 +159,7 @@ function TimesheetGridContent() {
       setCellStates(prev => ({ ...prev, [key]: 'saved' }))
       setTimeout(() => setCellStates(prev => { const n = { ...prev }; if (n[key] === 'saved') delete n[key]; return n }), 1500)
     }
-  }, [header, workers, holidays, ramadanMode, month, year, locked])
+  }, [buildLineRow, header, locked, workers])
 
   const handleCellChange = useCallback((workerId, day, rawValue) => {
     const key = `${workerId}_${day}`
@@ -222,6 +242,26 @@ function TimesheetGridContent() {
     return Object.values(grid).filter(c => c.absence_status === 'conflict').length
   }, [grid])
 
+  const conflictRows = useMemo(() => {
+    const rows = []
+    workers.forEach(worker => {
+      for (let day = 1; day <= numDays; day++) {
+        const key = `${worker.id}_${day}`
+        const cell = grid[key]
+        if (cell?.absence_status !== 'conflict') continue
+        rows.push({
+          key,
+          worker,
+          day,
+          date: formatDateStr(day, month, year),
+          hours: capHours(cell.total_hours),
+          note: cell.absence_note || (cell.total_hours < 4 ? 'Working day below 4 hours' : 'Needs review'),
+        })
+      }
+    })
+    return rows
+  }, [grid, month, numDays, workers, year])
+
   // Per-worker totals
   const workerTotals = useMemo(() => {
     const totals = {}
@@ -259,21 +299,54 @@ function TimesheetGridContent() {
     if (!file) return
     try {
       const parsed = await parseClientTimesheet(file)
+      const validation = validateTimesheetMonth(parsed, MONTH_NAMES[month - 1], year)
       const matched = parsed.workers.map(pw => {
         const result = matchWorkerToIWS(pw.worker_name, workers)
-        return { ...pw, iwsWorker: result?.worker || null, confidence: result?.confidence || null }
+        const nonZeroDays = (pw.daily_hours || []).filter(h => Number(h) > 0).length
+        return { ...pw, iwsWorker: result?.worker || null, confidence: result?.confidence || null, nonZeroDays }
       })
-      // Pre-fill grid
-      const unmatched = []
-      matched.forEach(m => {
-        if (!m.iwsWorker) { unmatched.push(m.worker_name); return }
-        m.daily_hours.forEach((hrs, idx) => {
-          if (hrs > 0) handleCellChange(m.iwsWorker.id, idx + 1, hrs)
-        })
+      setPendingImport({
+        fileName: file.name,
+        parsed,
+        validation,
+        matched,
+        unmatched: matched.filter(m => !m.iwsWorker).map(m => m.worker_name),
+        selectedMonth: `${MONTH_NAMES[month - 1]} ${year}`,
       })
-      setUploadResult({ total: matched.length, matched: matched.filter(m => m.iwsWorker).length, unmatched })
+      setUploadResult(null)
     } catch (err) { alert('Parse error: ' + err.message) }
     e.target.value = ''
+  }
+
+  const applyPendingImport = async () => {
+    if (!pendingImport || !header || locked) return
+    setImportApplying(true)
+    let appliedCells = 0
+    const unmatched = []
+    for (const importedWorker of pendingImport.matched) {
+      if (!importedWorker.iwsWorker) {
+        unmatched.push(importedWorker.worker_name)
+        continue
+      }
+      const worker = importedWorker.iwsWorker
+      for (let idx = 0; idx < Math.min(numDays, importedWorker.daily_hours.length); idx++) {
+        const day = idx + 1
+        const hrs = capHours(importedWorker.daily_hours[idx])
+        const note = importedWorker.daily_notes?.[idx] || null
+        const noteStatus = note ? NOTE_STATUS_MAP[note] : undefined
+        if (hrs <= 0 && (noteStatus === undefined || noteStatus === null)) continue
+        await saveCell(worker.id, day, hrs, noteStatus || {})
+        appliedCells += 1
+      }
+    }
+    setUploadResult({
+      total: pendingImport.matched.length,
+      matched: pendingImport.matched.filter(m => m.iwsWorker).length,
+      unmatched,
+      appliedCells,
+    })
+    setPendingImport(null)
+    setImportApplying(false)
   }
 
   // Save All
@@ -370,11 +443,105 @@ function TimesheetGridContent() {
 
       {locked && <div style={{background:'#fef2f2',border:'2px solid #fca5a5',borderRadius:8,padding:'10px 16px',marginBottom:16,fontSize:13,color:'#991b1b',fontWeight:600}}>Payroll has been generated for {MONTH_NAMES[month-1]} {year}. Grid is read-only. Contact Owner to unlock.</div>}
 
+      {pendingImport && (
+        <div style={{background:'#fff7ed',border:'1px solid #fdba74',borderRadius:8,padding:'12px 16px',marginBottom:16}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'flex-start',marginBottom:10}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:'#9a3412'}}>Review Excel import before applying</div>
+              <div style={{fontSize:12,color:'#7c2d12',marginTop:2}}>
+                {pendingImport.fileName} - {pendingImport.matched.filter(m => m.iwsWorker).length}/{pendingImport.matched.length} workers matched - {Math.round(pendingImport.parsed.total_hours * 10) / 10} total hours
+              </div>
+              {!pendingImport.validation.valid && (
+                <div style={{fontSize:12,color:pendingImport.validation.error ? '#b91c1c' : '#92400e',marginTop:6,fontWeight:600}}>
+                  {pendingImport.validation.error || pendingImport.validation.warning}
+                </div>
+              )}
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={() => setPendingImport(null)} className="btn btn-secondary btn-sm">Cancel</button>
+              <button onClick={applyPendingImport} disabled={importApplying || locked || !canEdit || !!pendingImport.validation.error} className="btn btn-primary btn-sm">
+                {importApplying ? 'Applying...' : 'Apply to Grid'}
+              </button>
+            </div>
+          </div>
+          {pendingImport.unmatched.length > 0 && (
+            <div style={{fontSize:12,color:'#b91c1c',marginBottom:8}}>
+              Unmatched workers: {pendingImport.unmatched.join(', ')}
+            </div>
+          )}
+          <div className="table-wrap" style={{maxHeight:220,overflow:'auto',border:'1px solid #fed7aa',borderRadius:6}}>
+            <table>
+              <thead><tr><th>Imported worker</th><th>IWS match</th><th>Confidence</th><th>Days</th><th>Total hours</th></tr></thead>
+              <tbody>
+                {pendingImport.matched.map((row, idx) => (
+                  <tr key={`${row.worker_name}-${idx}`}>
+                    <td>{row.worker_name}<div style={{fontSize:11,color:'var(--muted)'}}>{row.trade || '-'}</div></td>
+                    <td>{row.iwsWorker ? `${row.iwsWorker.full_name} (${row.iwsWorker.worker_number})` : <span style={{color:'#b91c1c',fontWeight:700}}>Not matched</span>}</td>
+                    <td>{row.confidence || '-'}</td>
+                    <td>{row.nonZeroDays}</td>
+                    <td>{Math.round(Number(row.total_hours || 0) * 10) / 10}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {uploadResult && (
         <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,padding:'10px 16px',marginBottom:16,fontSize:12}}>
-          Excel imported: {uploadResult.matched}/{uploadResult.total} workers matched.
+          Excel applied: {uploadResult.matched}/{uploadResult.total} workers matched. {uploadResult.appliedCells ? `${uploadResult.appliedCells} cells written or queued.` : ''}
           {uploadResult.unmatched.length > 0 && <div style={{color:'#c2410c',marginTop:4}}>Unmatched: {uploadResult.unmatched.join(', ')}</div>}
           <button onClick={() => setUploadResult(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#64748b',marginLeft:8}}>Dismiss</button>
+        </div>
+      )}
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:10,marginBottom:16}}>
+        {[
+          { label: '1 Import or enter', active: !locked, detail: pendingImport ? 'Review import before applying' : 'Manual grid or Excel' },
+          { label: '2 Resolve conflicts', active: conflictCount > 0, detail: conflictCount > 0 ? `${conflictCount} needs action` : 'No open conflicts' },
+          { label: '3 Reconcile', active: false, detail: 'Compare client sheet separately' },
+          { label: '4 Generate payroll', active: !locked && conflictCount === 0 && canEdit, detail: locked ? 'Payroll locked' : conflictCount > 0 ? 'Blocked by conflicts' : 'Ready when hours are final' },
+        ].map(step => (
+          <div key={step.label} style={{border:'1px solid '+(step.active ? '#0d9488' : '#e2e8f0'),background:step.active ? '#f0fdfa' : '#fff',borderRadius:8,padding:'10px 12px'}}>
+            <div style={{fontSize:12,fontWeight:700,color:step.active ? '#0f766e' : '#334155'}}>{step.label}</div>
+            <div style={{fontSize:11,color:'var(--muted)',marginTop:3}}>{step.detail}</div>
+          </div>
+        ))}
+      </div>
+
+      {conflictRows.length > 0 && (
+        <div style={{background:'#fff7ed',border:'1px solid #fdba74',borderRadius:8,padding:'12px 16px',marginBottom:16}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,marginBottom:8}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:'#9a3412'}}>Conflict review</div>
+              <div style={{fontSize:12,color:'#7c2d12'}}>Resolve these before payroll can be generated.</div>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowConflictsOnly(true)}>Show only conflict rows</button>
+          </div>
+          <div className="table-wrap" style={{maxHeight:230,overflow:'auto',border:'1px solid #fed7aa',borderRadius:6}}>
+            <table>
+              <thead><tr><th>Worker</th><th>Date</th><th>Hours</th><th>Reason</th><th>Quick actions</th></tr></thead>
+              <tbody>
+                {conflictRows.map(row => (
+                  <tr key={row.key}>
+                    <td>{row.worker.full_name}<div style={{fontSize:11,color:'var(--muted)'}}>{row.worker.worker_number}</div></td>
+                    <td>{row.date}</td>
+                    <td>{row.hours}</td>
+                    <td>{row.note}</td>
+                    <td>
+                      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                        <button className="btn btn-sm btn-secondary" onClick={() => resolveConflict(row.worker.id, row.day, 'unauthorised_absent')}>UA</button>
+                        <button className="btn btn-sm btn-secondary" onClick={() => resolveLeave(row.worker.id, row.day, 'annual')}>Annual leave</button>
+                        <button className="btn btn-sm btn-secondary" onClick={() => resolveConflict(row.worker.id, row.day, 'short_day_authorised')}>Authorised short day</button>
+                        <button className="btn btn-sm btn-teal" onClick={() => setActivePopover(row.key)}>More</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
