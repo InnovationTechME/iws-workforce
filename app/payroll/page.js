@@ -11,6 +11,23 @@ import { getVisibleWorkers } from '../../lib/workerService'
 import { formatCurrency, getStatusTone } from '../../lib/utils'
 import { canAccess, getRole } from '../../lib/mockAuth'
 
+const HOURLY_PAYROLL_TYPES = new Set(['hourly', 'flat_hourly'])
+
+function isHourlyPayrollLine(line) {
+  return HOURLY_PAYROLL_TYPES.has(line?.payroll_type)
+}
+
+function payrollTypeLabel(type) {
+  const map = {
+    flat_hourly: 'Flat hourly',
+    salaried_with_ot: 'Salaried + OT',
+    salaried_no_ot: 'Salaried no OT',
+    hourly: 'Hourly',
+    monthly: 'Monthly',
+  }
+  return map[type] || type || 'Monthly'
+}
+
 export default function PayrollPage() {
   const [allBatches, setAllBatches] = useState([])
   const [selectedBatchId, setSelectedBatchId] = useState(null)
@@ -195,11 +212,11 @@ export default function PayrollPage() {
             <tbody>
               {filtered.map(l => {
                 const w = l.worker || {}
-                const isHourly = l.payroll_type === 'hourly'
+                const isHourly = isHourlyPayrollLine(l)
                 return (
                 <tr key={l.id} style={{cursor:'pointer',background:selected?.id===l.id?'#eff6ff':''}} onClick={() => setSelected(l)}>
                   <td style={{fontWeight:500}}>{l.worker_name || w.full_name}<div style={{fontSize:11,color:'var(--hint)'}}>{l.worker_number || w.worker_number}</div></td>
-                  <td><StatusBadge label={l.payroll_type || 'monthly'} tone="neutral" /></td>
+                  <td><StatusBadge label={payrollTypeLabel(l.payroll_type)} tone="neutral" /></td>
                   <td><StatusBadge label={l.payment_method||'WPS'} tone={l.payment_method==='Non-WPS'?'warning':l.payment_method==='Cash'?'danger':'success'} /></td>
                   <td style={{textAlign:'right',fontSize:12}}>{isHourly ? `AED ${l.rate_used || l.base_hourly_rate}/hr` : formatCurrency(l.basic_salary)}</td>
                   <td style={{textAlign:'right',fontSize:12}}>{l.total_hours ? `${l.total_hours}h` : '—'}</td>
@@ -225,7 +242,7 @@ export default function PayrollPage() {
             </div>
             <div style={{padding:'16px 20px'}}>
               <div style={{fontSize:11,fontWeight:700,color:'var(--teal)',textTransform:'uppercase',letterSpacing:1,marginBottom:10}}>Earnings</div>
-              {selected.payroll_type === 'hourly' ? (<>
+              {isHourlyPayrollLine(selected) ? (<>
                 <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span>Hourly Rate</span><span>AED {selected.rate_used || selected.base_hourly_rate}/hr</span></div>
                 <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span>Hours Worked</span><span>{selected.total_hours}h</span></div>
                 <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span>Standard Pay</span><span>{formatCurrency(selected.basic_salary)}</span></div>
@@ -251,7 +268,7 @@ export default function PayrollPage() {
               <div style={{marginTop:12,fontSize:11,color:'var(--hint)'}}>
                 <div>Category: {selected.worker?.category || '—'}</div>
                 <div>Payment: {selected.payment_method || 'WPS'}</div>
-                <div>Payroll type: {selected.payroll_type || 'monthly'}</div>
+                <div>Payroll type: {payrollTypeLabel(selected.payroll_type)}</div>
                 {selected.ramadan_mode && <div style={{color:'#7c3aed',fontWeight:600}}>🌙 Ramadan mode</div>}
               </div>
             </div>

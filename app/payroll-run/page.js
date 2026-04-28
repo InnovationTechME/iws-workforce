@@ -17,6 +17,11 @@ import { buildWaLink, starterKey, STARTERS } from '../../lib/whatsappTemplates'
 import { classifyDay } from '../../lib/dateUtils'
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+const HOURLY_PAYROLL_TYPES = new Set(['hourly', 'flat_hourly'])
+
+function isHourlyPayrollLine(line) {
+  return HOURLY_PAYROLL_TYPES.has(line?.payroll_type)
+}
 
 const InstructionBanner = ({ step, title, roleLabel, description, howTo }) => (
   <div style={{background:'linear-gradient(135deg,#eff6ff,#f0fdfa)',border:'1px solid #bae6fd',borderRadius:10,padding:'16px 20px',marginBottom:20}}>
@@ -516,7 +521,7 @@ export default function PayrollRunPage() {
             {payrollLines.map(line => {
               const w = line.worker || {}
               const isExp = expandedWorker === line.id
-              const isHourly = line.payroll_type === 'hourly'
+              const isHourly = isHourlyPayrollLine(line)
               return (<React.Fragment key={line.id}>
                 <tr style={{cursor:'pointer',borderLeft:`3px solid ${{'Permanent Staff':'#1e3a8a','Office Staff':'#6366f1','Contract Worker':'#f59e0b','Subcontract Worker':'#94a3b8'}[w.category]||'#e2e8f0'}`,background:isExp?'#f0fdfa':'white'}} onClick={() => setExpandedWorker(isExp?null:line.id)}>
                   <td><div style={{fontWeight:600,fontSize:13}}>{line.worker_name || w.full_name}</div><div style={{fontSize:11,color:'#94a3b8',fontFamily:'monospace'}}>{line.worker_number || w.worker_number}</div></td>
@@ -758,7 +763,7 @@ export default function PayrollRunPage() {
             {payrollLines.map(line => {
               const w = line.worker || {}
               const isExp = expandedWorker===('owner_'+line.id)
-              const isHourly = line.payroll_type === 'hourly'
+              const isHourly = isHourlyPayrollLine(line)
               return (<React.Fragment key={line.id}>
                 <tr style={{cursor:'pointer',background:isExp?'#f0fdfa':'white'}} onClick={() => setExpandedWorker(isExp?null:'owner_'+line.id)}>
                   <td><div style={{fontWeight:600,fontSize:13}}>{line.worker_name || w.full_name}</div><div style={{fontSize:11,color:'#94a3b8',fontFamily:'monospace'}}>{line.worker_number || w.worker_number}</div></td>
@@ -833,7 +838,7 @@ export default function PayrollRunPage() {
     const generateWPSExcel = async () => {
       try {
         const XLSX = (await import('xlsx'))
-        const wpsData = payrollLines.filter(l=>l.payment_method==='WPS'||!l.payment_method).map(l=>{const w=l.worker||{};return {'IT Employee ID':l.worker_number||w.worker_number,'Full Name':l.worker_name||w.full_name,'Category':w.category,'Pay Type':l.payroll_type==='hourly'?'Hourly Rate':'Monthly Salary','Basic / Rate':l.payroll_type==='hourly'?l.rate_used:l.basic_salary,'Total Hours':l.total_hours||'','Allowances':l.allowances_total,'OT1 Pay':l.ot1_pay,'OT2 Pay':l.ot2_pay,'Gross Pay':l.gross_pay,'Deductions':l.deductions_total,'Net Pay':l.net_pay,'Payment Method':'WPS — C3 Card (Endered)'}})
+        const wpsData = payrollLines.filter(l=>l.payment_method==='WPS'||!l.payment_method).map(l=>{const w=l.worker||{};const isHourly=isHourlyPayrollLine(l);return {'IT Employee ID':l.worker_number||w.worker_number,'Full Name':l.worker_name||w.full_name,'Category':w.category,'Pay Type':isHourly?'Hourly Rate':'Monthly Salary','Basic / Rate':isHourly?l.rate_used:l.basic_salary,'Total Hours':l.total_hours||'','Allowances':l.allowances_total,'OT1 Pay':l.ot1_pay,'OT2 Pay':l.ot2_pay,'Gross Pay':l.gross_pay,'Deductions':l.deductions_total,'Net Pay':l.net_pay,'Payment Method':'WPS — C3 Card (Endered)'}})
         const nonWpsData = payrollLines.filter(l=>l.payment_method==='Non-WPS'||l.payment_method==='Cash').map(l=>{const w=l.worker||{};return {'IT Employee ID':l.worker_number||w.worker_number,'Full Name':l.worker_name||w.full_name,'Gross Pay':l.gross_pay,'Deductions':l.deductions_total,'Net Pay':l.net_pay,'Payment':l.payment_method}})
         const summaryData = [{'Section':'GRAND TOTAL','Amount':totals.totalNet,'WPS/Non-WPS':`WPS: AED ${totals.wpsTotal.toLocaleString()} | Non-WPS: AED ${totals.nonWpsTotal.toLocaleString()} | Cash: AED ${totals.cashTotal.toLocaleString()}`,'Workers':totals.workerCount}]
         const wb = XLSX.utils.book_new()

@@ -194,9 +194,7 @@ async function ensureTimesheets(client, workers) {
         is_friday: dow === 5,
         is_rest_day: false,
         is_public_holiday: false,
-        client_hours: hours,
-        iws_hours: hours,
-        conflict_status: 'none',
+        absence_status: null,
       })
     }
   }
