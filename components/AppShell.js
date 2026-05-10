@@ -4,6 +4,14 @@ import Sidebar from './Sidebar'
 import { supabase } from '../lib/supabaseClient'
 import { TODAY } from '../lib/utils'
 
+function withTimeout(promise, timeoutMs = 3500) {
+  let timeoutId
+  const timeout = new Promise(resolve => {
+    timeoutId = setTimeout(() => resolve({ count: 0, error: new Error('alert query timed out') }), timeoutMs)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId))
+}
+
 export default function AppShell({ children, pageTitle }) {
   const [alertDots, setAlertDots] = useState({})
 
@@ -13,7 +21,7 @@ export default function AppShell({ children, pageTitle }) {
       const today = TODAY
       const in30 = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
       const count = async (query) => {
-        const { count: value, error } = await query
+        const { count: value, error } = await withTimeout(query)
         if (error) return 0
         return value || 0
       }

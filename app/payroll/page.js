@@ -10,6 +10,7 @@ import {
 import { getVisibleWorkers } from '../../lib/workerService'
 import { formatCurrency, getStatusTone } from '../../lib/utils'
 import { canAccess, getRole } from '../../lib/mockAuth'
+import { getPendingDiscrepanciesByPeriod } from '../../lib/timesheetDiscrepancyService'
 
 const HOURLY_PAYROLL_TYPES = new Set(['hourly', 'flat_hourly'])
 
@@ -42,6 +43,7 @@ export default function PayrollPage() {
   const [showWhatsApp, setShowWhatsApp] = useState(false)
   const [showUnlockModal, setShowUnlockModal] = useState(false)
   const [unlockReason, setUnlockReason] = useState('')
+  const [reconciliationSummary, setReconciliationSummary] = useState(null)
 
   useEffect(() => {
     async function init() {
@@ -75,6 +77,11 @@ export default function PayrollPage() {
       ])
       setBatch(b)
       setLines(l)
+      if (b?.month && b?.year) {
+        setReconciliationSummary(await getPendingDiscrepanciesByPeriod(b.month, b.year))
+      } else {
+        setReconciliationSummary(null)
+      }
     } catch (err) {
       console.error('loadBatch error:', err)
     }
@@ -109,6 +116,7 @@ export default function PayrollPage() {
     nonWps: lines.filter(l => l.payment_method === 'Non-WPS').reduce((s,l) => s + Number(l.net_pay || 0), 0),
     cash: lines.filter(l => l.payment_method === 'Cash').reduce((s,l) => s + Number(l.net_pay || 0), 0),
   }
+  const pendingDiscrepancyCount = reconciliationSummary?.pendingCount || 0
 
   return (
     <AppShell pageTitle="Payroll">
@@ -125,6 +133,20 @@ export default function PayrollPage() {
           <StatusBadge label={batch.status === 'locked' ? '🔒 Locked' : batch.status === 'ops_approved' ? '✓ Ops Approved' : batch.status === 'owner_approved' ? '✓ Approved' : batch.status === 'calculated' ? '⏳ Awaiting Approval' : batch.status} tone={batch.status === 'locked' ? 'danger' : batch.status === 'ops_approved' ? 'info' : batch.status === 'owner_approved' ? 'success' : batch.status === 'calculated' ? 'warning' : 'neutral'} />
         </div>
       </div>
+
+      {pendingDiscrepancyCount > 0 && (
+        <div style={{background:'#fff7ed',border:'2px solid #fb923c',borderRadius:12,padding:'16px 20px',marginBottom:20}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:16,alignItems:'center'}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:'#c2410c'}}>Payroll has unresolved timesheet discrepancies</div>
+              <div style={{fontSize:12,color:'#7c2d12',marginTop:4}}>
+                {pendingDiscrepancyCount} pending conflict{pendingDiscrepancyCount === 1 ? '' : 's'} for {batch.month_label}. Resolve or ignore them before final payroll export.
+              </div>
+            </div>
+            <a href="/timesheet-reconcile" className="btn btn-secondary btn-sm" style={{whiteSpace:'nowrap'}}>Open Reconciliation</a>
+          </div>
+        </div>
+      )}
 
       {/* Lock Banner */}
       {batch.status === 'locked' && (

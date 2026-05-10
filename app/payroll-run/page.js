@@ -15,6 +15,7 @@ import { getPublicHolidaysByYear } from '../../lib/publicHolidayService'
 import { getRole } from '../../lib/mockAuth'
 import { buildWaLink, starterKey, STARTERS } from '../../lib/whatsappTemplates'
 import { classifyDay } from '../../lib/dateUtils'
+import { getPendingDiscrepanciesByPeriod } from '../../lib/timesheetDiscrepancyService'
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const HOURLY_PAYROLL_TYPES = new Set(['hourly', 'flat_hourly'])
@@ -89,12 +90,28 @@ export default function PayrollRunPage() {
   // Selected month/year for batch generation
   const [selectedMonth, setSelectedMonth] = useState(null)
   const [selectedYear, setSelectedYear] = useState(null)
+  const [reconciliationSummary, setReconciliationSummary] = useState(null)
+  const [reconciliationLoading, setReconciliationLoading] = useState(false)
 
   const showSuccess = (msg) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(null), 3000) }
   const showError = (msg) => { setErrorMsg(msg); setTimeout(() => setErrorMsg(null), 5000) }
 
   const isHoliday = useCallback((dateStr) => holidays.some(h => h.date === dateStr), [holidays])
   const getHolidayName = useCallback((dateStr) => holidays.find(h => h.date === dateStr)?.name || '', [holidays])
+  const loadReconciliationSummary = useCallback(async (month, year) => {
+    if (!month || !year) {
+      setReconciliationSummary(null)
+      return { pendingCount: 0, rows: [], headers: [], tableAvailable: true }
+    }
+    setReconciliationLoading(true)
+    try {
+      const summary = await getPendingDiscrepanciesByPeriod(month, year)
+      setReconciliationSummary(summary)
+      return summary
+    } finally {
+      setReconciliationLoading(false)
+    }
+  }, [])
 
   // Load batch payroll lines
   const loadBatchData = useCallback(async (batch) => {
@@ -183,7 +200,8 @@ export default function PayrollRunPage() {
         // Load holidays and timesheet lines for the working year/month
         const [hols, tsLines] = await Promise.all([
           getPublicHolidaysByYear(workYear),
-          getTimesheetLinesByMonth(workMonth, workYear)
+          getTimesheetLinesByMonth(workMonth, workYear),
+          loadReconciliationSummary(workMonth, workYear)
         ])
         setHolidays(hols)
         setAllLines(tsLines)
@@ -202,7 +220,7 @@ export default function PayrollRunPage() {
       }
     }
     init()
-  }, [loadBatchData])
+  }, [loadBatchData, loadReconciliationSummary])
 
   // Handle switching batch period
   const handlePeriodChange = async (monthYear) => {
@@ -221,12 +239,14 @@ export default function PayrollRunPage() {
     setStepStatus({1:'active',2:'locked',3:'locked',4:'locked',5:'locked'})
     setPayrollLines([])
     setSelectedBatch(null)
+    setReconciliationSummary(null)
 
     try {
       const [tsLines, hdrs, hols] = await Promise.all([
         getTimesheetLinesByMonth(m, y),
         getTimesheetHeaders(),
-        getPublicHolidaysByYear(y)
+        getPublicHolidaysByYear(y),
+        loadReconciliationSummary(m, y)
       ])
       setAllLines(tsLines)
       setTimesheetHeaders(hdrs.filter(h => h.month === m && h.year === y))
@@ -246,9 +266,14 @@ export default function PayrollRunPage() {
   // Generate payroll via RPC
   const handleGeneratePayroll = async () => {
     if (!selectedMonth || !selectedYear) return
-    setRpcLoading(true)
     setErrorMsg(null)
     try {
+      const reconciliation = await loadReconciliationSummary(selectedMonth, selectedYear)
+      if ((reconciliation?.pendingCount || 0) > 0) {
+        showError(`Resolve ${reconciliation.pendingCount} pending timesheet conflict${reconciliation.pendingCount === 1 ? '' : 's'} before generating payroll.`)
+        return
+      }
+      setRpcLoading(true)
       const monthLabel = `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`
       const batchId = await generatePayrollBatch(selectedMonth, selectedYear, monthLabel)
       const [batches, batch, lines] = await Promise.all([
@@ -323,6 +348,26 @@ export default function PayrollRunPage() {
   ]
 
   const completedCount = Object.values(stepStatus).filter(s => s === 'complete').length
+  const pendingDiscrepancyCount = reconciliationSummary?.pendingCount || 0
+  const hasBlockingDiscrepancies = pendingDiscrepancyCount > 0
+
+  const ReconciliationBlocker = ({ compact = false }) => {
+    if (!hasBlockingDiscrepancies) return null
+    const reconciliationHref = `/timesheet-reconcile?month=${selectedMonth}&year=${selectedYear}`
+    return (
+      <div style={{background:'#fff7ed',border:'2px solid #fb923c',borderRadius:10,padding:compact?'12px 14px':'16px 20px',marginBottom:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',flexWrap:'wrap'}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:'#c2410c'}}>Resolve timesheet discrepancies before payroll can continue</div>
+            <div style={{fontSize:12,color:'#7c2d12',marginTop:4}}>
+              {pendingDiscrepancyCount} pending conflict{pendingDiscrepancyCount === 1 ? '' : 's'} for {MONTH_NAMES[(selectedMonth || 1) - 1]} {selectedYear}. Resolve or ignore them in reconciliation.
+            </div>
+          </div>
+          <a href={reconciliationHref} className="btn btn-secondary btn-sm" style={{whiteSpace:'nowrap'}}>Open Reconciliation</a>
+        </div>
+      </div>
+    )
+  }
 
   // ── Step 1: Timesheet Review ──
   const Step1TimesheetReview = () => {
@@ -361,6 +406,8 @@ export default function PayrollRunPage() {
       <InstructionBanner step={1} title="Timesheet Review" roleLabel="HR Admin"
         description="Review all worker hours for this pay period. Verify the hours are correct before generating payroll."
         howTo={['Each worker row shows their daily hours for the month','Sunday/rest-day columns are highlighted amber and use rest-day premium rules','Red column headers indicate UAE public holidays','Use the Print button at any time to print the full timesheet','Select a single worker from the dropdown to review individually','When satisfied, click Confirm & Generate Payroll']} />
+
+      <ReconciliationBlocker />
 
       {/* Filters */}
       <div style={{display:'flex',gap:12,alignItems:'center',marginBottom:16,flexWrap:'wrap'}}>
@@ -476,8 +523,8 @@ export default function PayrollRunPage() {
             <span style={{fontSize:13,fontWeight:600,color:'#16a34a',background:'#f0fdf4',padding:'8px 14px',borderRadius:6}}>✓ Payroll Generated</span>
             <button className="btn btn-primary" onClick={() => setCurrentStep(2)}>Go to Step 2 →</button>
           </>) : (
-            <button className="btn btn-primary" style={{padding:'10px 24px',fontSize:14,opacity:rpcLoading||monthHeaders.length===0?0.4:1}} disabled={rpcLoading||monthHeaders.length===0} onClick={handleGeneratePayroll}>
-              {rpcLoading ? 'Generating...' : '⚡ Confirm Timesheet & Generate Payroll'}
+            <button className="btn btn-primary" style={{padding:'10px 24px',fontSize:14,opacity:rpcLoading||reconciliationLoading||monthHeaders.length===0||hasBlockingDiscrepancies?0.4:1}} disabled={rpcLoading||reconciliationLoading||monthHeaders.length===0||hasBlockingDiscrepancies} onClick={handleGeneratePayroll}>
+              {rpcLoading ? 'Generating...' : reconciliationLoading ? 'Checking conflicts...' : '⚡ Confirm Timesheet & Generate Payroll'}
             </button>
           )}
         </div>
@@ -490,6 +537,8 @@ export default function PayrollRunPage() {
     const totals = computeTotals()
     return (<div>
       <InstructionBanner step={2} title="Payroll Calculation" roleLabel="HR Admin" description="Review the calculated earnings for every worker. All figures are computed by the database RPC and persisted to payroll_lines. Add any adjustments needed and confirm before sending for Operations approval." howTo={['Review each worker row — click any row to see the full pay breakdown','Use the + Add Adjustment button to add bonuses, deductions, or advance recovery','Check the WPS / Non-WPS / Cash split totals are correct','When totals look right — click Confirm Calculation','To re-generate from scratch, use the Delete Draft button and start over']} />
+
+      <ReconciliationBlocker compact />
 
       {/* Summary strip */}
       <div className="summary-strip" style={{marginBottom:16}}>
@@ -605,7 +654,8 @@ export default function PayrollRunPage() {
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
           <button className="btn btn-secondary" onClick={() => setCurrentStep(1)}>← Back to Step 1</button>
           {step2Confirmed?(<><span style={{fontSize:13,fontWeight:600,color:'#16a34a',background:'#f0fdf4',padding:'8px 14px',borderRadius:6}}>✓ Step 2 Complete</span><button className="btn btn-secondary" onClick={() => {setStep2Confirmed(false);setStepStatus(prev=>({...prev,2:'active',3:'locked'}))}}>← Edit Calculation</button><button className="btn btn-primary" onClick={() => setCurrentStep(3)}>Go to Step 3 →</button></>)
-          :(<button className="btn btn-primary" style={{padding:'10px 24px',fontSize:14}} onClick={async () => {
+          :(<button className="btn btn-primary" style={{padding:'10px 24px',fontSize:14,opacity:hasBlockingDiscrepancies?0.4:1}} disabled={hasBlockingDiscrepancies} onClick={async () => {
+            if (hasBlockingDiscrepancies) return
             setStep2Confirmed(true); setStepStatus(prev=>({...prev,2:'complete',3:'active'}))
             if(selectedBatch) {
               try {
@@ -641,6 +691,8 @@ export default function PayrollRunPage() {
 
     return (<div>
       <InstructionBanner step={3} title="Operations Approval" roleLabel="Operations" description="Review the payroll hours and confirm they match what actually happened on site." howTo={['Review the worker hours summary table below','Check each worker\'s total hours match your site records','Click Flag next to any worker if their hours are incorrect','If everything is correct: click Approve Hours','If something needs fixing: click Reject and explain what HR needs to correct']} />
+
+      <ReconciliationBlocker compact />
 
       {opsRejected && (<div style={{background:'#fff7ed',border:'2px solid #fb923c',borderRadius:10,padding:'16px 20px',marginBottom:20}}>
         <div style={{fontWeight:700,color:'#c2410c',fontSize:14,marginBottom:8}}>⚠ Operations rejected this payroll</div>
@@ -696,10 +748,11 @@ export default function PayrollRunPage() {
       {canApproveOps&&!opsRejected&&!step3Approved&&(<div style={{background:'white',border:'1px solid #e2e8f0',borderRadius:10,padding:'20px 24px',marginTop:20}}>
         <div style={{fontSize:14,fontWeight:700,color:'#0f172a',marginBottom:16}}>Operations Decision</div>
         {flaggedCount>0&&<div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:'10px 14px',marginBottom:16,fontSize:12,color:'#dc2626',fontWeight:600}}>⚠ {flaggedCount} worker{flaggedCount>1?'s':''} flagged — resolve flags before approving, or reject with explanation</div>}
+        {hasBlockingDiscrepancies&&<div style={{background:'#fff7ed',border:'1px solid #fb923c',borderRadius:8,padding:'10px 14px',marginBottom:16,fontSize:12,color:'#c2410c',fontWeight:600}}>Resolve reconciliation conflicts before approving hours.</div>}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
           <button className="btn btn-secondary" style={{padding:14,fontSize:14,border:'2px solid #dc2626',color:'#dc2626'}} onClick={() => setShowOpsRejectModal(true)}>✕ Reject — Send back to HR</button>
-          <button className="btn btn-primary" style={{padding:14,fontSize:14,background:'linear-gradient(135deg,#0d9488,#0891b2)',opacity:flaggedCount>0?0.5:1,cursor:flaggedCount>0?'not-allowed':'pointer'}} disabled={flaggedCount>0} onClick={async () => {
-            if(flaggedCount>0) return
+          <button className="btn btn-primary" style={{padding:14,fontSize:14,background:'linear-gradient(135deg,#0d9488,#0891b2)',opacity:flaggedCount>0||hasBlockingDiscrepancies?0.5:1,cursor:flaggedCount>0||hasBlockingDiscrepancies?'not-allowed':'pointer'}} disabled={flaggedCount>0||hasBlockingDiscrepancies} onClick={async () => {
+            if(flaggedCount>0 || hasBlockingDiscrepancies) return
             if(!window.confirm(`Confirm: You have reviewed all hours for ${MONTH_NAMES[(selectedMonth||1)-1]} ${selectedYear} and they are correct?`)) return
             if(selectedBatch) {
               try {
@@ -726,11 +779,14 @@ export default function PayrollRunPage() {
     const canApprove = role === 'owner' || role === 'accounts'
     const totals = computeTotals()
     const allChecked = approvalChecklist.conflicts && approvalChecklist.penalties && approvalChecklist.opsApproved && approvalChecklist.carryOver && approvalChecklist.wpsReviewed
+    const canLockPayroll = allChecked && !hasBlockingDiscrepancies
 
     return (<div>
       <InstructionBanner step={4} title="Management Approval" roleLabel="Management / Accounts"
         description="This is the final review before payroll is executed. Review all totals, confirm the pre-approval checklist, and sign off."
         howTo={['Review the payroll summary cards and WPS split','Expand any worker row to inspect their full breakdown','Complete all 5 checklist items','Click Approve & Lock to finalize, or Reject to send back']} />
+
+      <ReconciliationBlocker compact />
 
       {!canApprove && <div style={{background:'#f0f9ff',border:'1px solid #bae6fd',borderRadius:8,padding:'12px 16px',marginBottom:16,fontSize:13,color:'#0369a1'}}>ℹ Only Management or Accounts role can approve payroll. Current role: {role}</div>}
 
@@ -817,9 +873,10 @@ export default function PayrollRunPage() {
         <div style={{padding:'0 20px 20px'}}>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
             <button className="btn btn-secondary" style={{padding:14,fontSize:14,border:'2px solid #dc2626',color:'#dc2626'}} onClick={() => setShowOwnerRejectModal(true)}>✕ Reject — Send back for review</button>
-            <button className="btn btn-primary" style={{padding:'14px',fontSize:15,background:allChecked?'linear-gradient(135deg,#0d9488,#0891b2)':'#cbd5e1',cursor:allChecked?'pointer':'not-allowed',border:'none',borderRadius:10,fontWeight:700,color:'white'}} disabled={!allChecked} onClick={() => setShowApprovalModal(true)}>✅ APPROVE & LOCK PAYROLL</button>
+            <button className="btn btn-primary" style={{padding:'14px',fontSize:15,background:canLockPayroll?'linear-gradient(135deg,#0d9488,#0891b2)':'#cbd5e1',cursor:canLockPayroll?'pointer':'not-allowed',border:'none',borderRadius:10,fontWeight:700,color:'white'}} disabled={!canLockPayroll} onClick={() => setShowApprovalModal(true)}>✅ APPROVE & LOCK PAYROLL</button>
           </div>
           {!allChecked && <div style={{textAlign:'center',fontSize:11,color:'#94a3b8',marginTop:8}}>Complete all checklist items to enable approval</div>}
+          {hasBlockingDiscrepancies && <div style={{textAlign:'center',fontSize:11,color:'#c2410c',marginTop:8}}>Resolve reconciliation conflicts before locking payroll</div>}
         </div>
       </div>)}
 
@@ -836,6 +893,10 @@ export default function PayrollRunPage() {
     const batchLabel = selectedBatch?.month_label || `${MONTH_NAMES[(selectedMonth||1)-1]} ${selectedYear}`
 
     const generateWPSExcel = async () => {
+      if (hasBlockingDiscrepancies) {
+        showError('Resolve timesheet reconciliation conflicts before exporting payroll files.')
+        return
+      }
       try {
         const XLSX = (await import('xlsx'))
         const wpsData = payrollLines.filter(l=>l.payment_method==='WPS'||!l.payment_method).map(l=>{const w=l.worker||{};const isHourly=isHourlyPayrollLine(l);return {'IT Employee ID':l.worker_number||w.worker_number,'Full Name':l.worker_name||w.full_name,'Category':w.category,'Pay Type':isHourly?'Hourly Rate':'Monthly Salary','Basic / Rate':isHourly?l.rate_used:l.basic_salary,'Total Hours':l.total_hours||'','Allowances':l.allowances_total,'OT1 Pay':l.ot1_pay,'OT2 Pay':l.ot2_pay,'Gross Pay':l.gross_pay,'Deductions':l.deductions_total,'Net Pay':l.net_pay,'Payment Method':'WPS — C3 Card (Endered)'}})
@@ -857,6 +918,7 @@ export default function PayrollRunPage() {
       <InstructionBanner step={5} title="Run & Distribute" roleLabel="HR Admin / Management"
         description="Payroll has been approved. Download the WPS file and distribute to workers."
         howTo={['Download the WPS Excel file for Endered/C3 upload','The batch is now locked — no further edits are possible']} />
+      <ReconciliationBlocker compact />
       </div>
 
       <div id="summary-print-area">
@@ -874,13 +936,14 @@ export default function PayrollRunPage() {
           <div style={{fontSize:32,marginBottom:8}}>📊</div>
           <div style={{fontSize:14,fontWeight:700,color:'#0f172a',marginBottom:4}}>WPS Excel</div>
           <div style={{fontSize:11,color:'#64748b',marginBottom:12}}>For Endered/C3 platform upload</div>
-          <button className="btn btn-primary btn-sm" onClick={generateWPSExcel}>Download .xlsx</button>
+          <button className="btn btn-primary btn-sm" disabled={hasBlockingDiscrepancies} style={{opacity:hasBlockingDiscrepancies?0.45:1}} onClick={generateWPSExcel}>Download .xlsx</button>
         </div>
         <div style={{background:'white',border:'1.5px solid #e2e8f0',borderRadius:10,padding:'20px',textAlign:'center'}}>
           <div style={{fontSize:32,marginBottom:8}}>📦</div>
           <div style={{fontSize:14,fontWeight:700,color:'#0f172a',marginBottom:4}}>All Payslips</div>
           <div style={{fontSize:11,color:'#64748b',marginBottom:12}}>Download all as PDF ZIP</div>
-          <button className="btn btn-primary btn-sm" disabled={zipping} onClick={async () => {
+          <button className="btn btn-primary btn-sm" disabled={zipping||hasBlockingDiscrepancies} style={{opacity:hasBlockingDiscrepancies?0.45:1}} onClick={async () => {
+            if (hasBlockingDiscrepancies) return
             setZipping(true)
             try {
               const { downloadBatchPayslipsZip } = await import('../../lib/payslipPDF')
@@ -917,8 +980,10 @@ export default function PayrollRunPage() {
                 <td style={{textAlign:'right',fontSize:13,fontWeight:700,color:'#0d9488'}}>AED {Number(line.net_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
                 <td className="no-print" style={{textAlign:'center'}}>
                   <button style={{background:'none',border:'none',cursor:'pointer',color:'#0d9488',fontSize:12,fontWeight:600,padding:'2px 6px'}}
-                    disabled={pdfWorker === line.id}
+                    disabled={pdfWorker === line.id || hasBlockingDiscrepancies}
+                    title={hasBlockingDiscrepancies ? 'Resolve reconciliation conflicts before exporting payslips' : undefined}
                     onClick={async () => {
+                      if (hasBlockingDiscrepancies) return
                       setPdfWorker(line.id)
                       try {
                         const { downloadPayslipPDF } = await import('../../lib/payslipPDF')
@@ -1080,7 +1145,12 @@ export default function PayrollRunPage() {
         </div>
         <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:16}}>
           <button className="btn btn-secondary" onClick={() => setShowApprovalModal(false)}>Cancel</button>
-          <button className="btn btn-primary" style={{padding:'10px 24px',background:'linear-gradient(135deg,#0d9488,#0891b2)'}} onClick={async () => {
+          <button className="btn btn-primary" disabled={hasBlockingDiscrepancies} style={{padding:'10px 24px',background:hasBlockingDiscrepancies?'#cbd5e1':'linear-gradient(135deg,#0d9488,#0891b2)'}} onClick={async () => {
+            if (hasBlockingDiscrepancies) {
+              showError('Resolve timesheet reconciliation conflicts before locking payroll.')
+              setShowApprovalModal(false)
+              return
+            }
             if (selectedBatch) {
               try {
                 const approverName = role==='owner'?'Management':role==='accounts'?'Accounts':role

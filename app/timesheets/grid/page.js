@@ -1,11 +1,13 @@
 'use client'
 import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
+import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import AppShell from '../../../components/AppShell'
 import { supabase } from '../../../lib/supabaseClient'
 import { classifyDay, getHolidayName, daysInMonth, formatDateStr } from '../../../lib/dateUtils'
 import { splitHours, detectConflict, capHours } from '../../../lib/timesheetGridLogic'
-import { parseClientTimesheet, matchWorkerToIWS, validateTimesheetMonth } from '../../../lib/excelParser'
+import { downloadStandardTimesheetTemplate, parseClientTimesheet, matchWorkerToIWS, validateTimesheetMonth } from '../../../lib/excelParser'
+import { getPendingDiscrepanciesByPeriod } from '../../../lib/timesheetDiscrepancyService'
 import { getRole } from '../../../lib/mockAuth'
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
@@ -22,6 +24,7 @@ const NOTE_STATUS_MAP = {
 }
 
 const INNOVATION_INTERNAL_ID = 'b970a080-59aa-440c-aff0-27f9b4d7610c'
+const EMPTY_RECONCILIATION = { pendingCount: 0, rows: [], headers: [], tableAvailable: true }
 
 function TimesheetGridContent() {
   const searchParams = useSearchParams()
@@ -50,6 +53,8 @@ function TimesheetGridContent() {
   const [pendingImport, setPendingImport] = useState(null)
   const [importApplying, setImportApplying] = useState(false)
   const [locked, setLocked] = useState(false)
+  const [payrollBatch, setPayrollBatch] = useState(null)
+  const [reconciliationSummary, setReconciliationSummary] = useState({ pendingCount: 0, rows: [], headers: [], tableAvailable: true })
   const debounceTimers = useRef({})
   const numDays = daysInMonth(month, year)
 
@@ -68,12 +73,30 @@ function TimesheetGridContent() {
 
   // Load workers + header + lines when client/month/year change
   useEffect(() => {
-    if (!clientId) return
+    if (!clientId) {
+      setWorkers([])
+      setHeader(null)
+      setGrid({})
+      setCellStates({})
+      setRamadanMode(false)
+      setLocked(false)
+      setPayrollBatch(null)
+      setReconciliationSummary(EMPTY_RECONCILIATION)
+      setPendingImport(null)
+      setUploadResult(null)
+      setLoading(false)
+      return
+    }
     loadGrid()
   }, [clientId, month, year])
 
   async function loadGrid() {
     setLoading(true)
+    setWorkers([])
+    setHeader(null)
+    setGrid({})
+    setCellStates({})
+    setPayrollBatch(null)
     const isInternal = clientId === INNOVATION_INTERNAL_ID
     // Load workers
     let wQuery = supabase.from('workers').select('id, full_name, worker_number, category, rest_day, monthly_salary, hourly_rate, housing_allowance, transport_allowance, food_allowance, other_allowance').eq('status', 'active').order('worker_number')
@@ -103,8 +126,13 @@ function TimesheetGridContent() {
     setRamadanMode(hdr?.ramadan_mode || false)
 
     // Check payroll lock
-    const { data: batches } = await supabase.from('payroll_batches').select('id, status').eq('month', month).eq('year', year).limit(1)
+    const [{ data: batches }, reconciliation] = await Promise.all([
+      supabase.from('payroll_batches').select('id, status, month_label').eq('month', month).eq('year', year).limit(1),
+      getPendingDiscrepanciesByPeriod(month, year).catch(error => ({ pendingCount: 0, rows: [], headers: [], tableAvailable: true, error: error.message })),
+    ])
+    setPayrollBatch(batches?.[0] || null)
     setLocked(!!(batches?.[0] && batches[0].status !== 'deleted'))
+    setReconciliationSummary(reconciliation || { pendingCount: 0, rows: [], headers: [], tableAvailable: true })
 
     // Load existing lines
     if (hdr) {
@@ -242,6 +270,18 @@ function TimesheetGridContent() {
     return Object.values(grid).filter(c => c.absence_status === 'conflict').length
   }, [grid])
 
+  const unsavedCount = useMemo(() => {
+    return Object.values(grid).filter(c => c && c._saved === false).length
+  }, [grid])
+
+  const enteredCellCount = useMemo(() => {
+    return Object.values(grid).filter(c => Number(c?.total_hours || 0) > 0 || c?.absence_status).length
+  }, [grid])
+
+  const totalGridHours = useMemo(() => {
+    return Math.round(Object.values(grid).reduce((sum, cell) => sum + Number(cell?.total_hours || 0), 0) * 10) / 10
+  }, [grid])
+
   const conflictRows = useMemo(() => {
     const rows = []
     workers.forEach(worker => {
@@ -284,13 +324,29 @@ function TimesheetGridContent() {
 
   // Generate Payroll
   const handleGeneratePayroll = async () => {
-    if (conflictCount > 0) return
+    if (!clientId || !header || workers.length === 0 || conflictCount > 0 || (reconciliationSummary?.pendingCount || 0) > 0 || unsavedCount > 0) return
     const monthLabel = `${MONTH_NAMES[month - 1]} ${year}`
     // Approve header first
     if (header) await supabase.from('timesheet_headers').update({ status: 'hr_approved' }).eq('id', header.id)
     const { error } = await supabase.rpc('generate_payroll_batch', { p_month: month, p_year: year, p_month_label: monthLabel })
     if (error) { alert('Error: ' + error.message); return }
     router.push('/payroll-run')
+  }
+
+  const handleDownloadTemplate = async () => {
+    if (!clientId) {
+      alert('Select a client first.')
+      return
+    }
+    await downloadStandardTimesheetTemplate({
+      month,
+      year,
+      monthName: MONTH_NAMES[month - 1],
+      clientName: clientName || 'Client site',
+      workers,
+      daysCount: numDays,
+      filePrefix: `IWS-${clientName || 'timesheet'}`,
+    })
   }
 
   // Excel upload
@@ -301,7 +357,7 @@ function TimesheetGridContent() {
       const parsed = await parseClientTimesheet(file)
       const validation = validateTimesheetMonth(parsed, MONTH_NAMES[month - 1], year)
       const matched = parsed.workers.map(pw => {
-        const result = matchWorkerToIWS(pw.worker_name, workers)
+        const result = matchWorkerToIWS(pw.worker_name, workers, pw.client_worker_id)
         const nonZeroDays = (pw.daily_hours || []).filter(h => Number(h) > 0).length
         return { ...pw, iwsWorker: result?.worker || null, confidence: result?.confidence || null, nonZeroDays }
       })
@@ -391,6 +447,17 @@ function TimesheetGridContent() {
   if (loading && clientId) return <AppShell pageTitle="Timesheet Grid"><div style={{padding:40,textAlign:'center'}}>Loading grid...</div></AppShell>
 
   const clientName = clients.find(c => c.id === clientId)?.name || ''
+  const pendingReconciliationCount = reconciliationSummary?.pendingCount || 0
+  const hasTimesheetContext = !!clientId && !!header && workers.length > 0
+  const hasPayrollBlockers = !hasTimesheetContext || conflictCount > 0 || pendingReconciliationCount > 0 || unsavedCount > 0
+  const payrollGateLabel = locked
+    ? 'Payroll locked'
+    : !hasTimesheetContext
+      ? 'Select timesheet'
+    : hasPayrollBlockers
+      ? 'Payroll blocked'
+      : 'Ready for payroll'
+  const reconcileHref = `/timesheet-reconcile?month=${month}&year=${year}${clientId ? `&client=${clientId}` : ''}`
 
   return (
     <AppShell pageTitle="Timesheet Grid">
@@ -403,6 +470,39 @@ function TimesheetGridContent() {
           Supplier filter is active. The grid is showing only active workers linked to that supplier company.
         </div>
       )}
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(5,minmax(0,1fr))',gap:10,marginBottom:14}}>
+        {[
+          { label: 'Workers', value: workers.length, tone: 'neutral', helper: clientName || 'No client selected' },
+          { label: 'Hours entered', value: totalGridHours, tone: totalGridHours > 0 ? 'success' : 'neutral', helper: `${enteredCellCount} filled cells` },
+          { label: 'Cell conflicts', value: conflictCount, tone: conflictCount > 0 ? 'danger' : 'success', helper: conflictCount > 0 ? 'Resolve in grid' : 'Clear' },
+          { label: 'Client conflicts', value: pendingReconciliationCount, tone: pendingReconciliationCount > 0 ? 'danger' : 'success', helper: pendingReconciliationCount > 0 ? 'Open conflicts' : 'Clear' },
+          { label: 'Payroll gate', value: payrollGateLabel, tone: locked ? 'warning' : hasPayrollBlockers ? 'danger' : 'success', helper: payrollBatch?.month_label || `${MONTH_NAMES[month - 1]} ${year}` },
+        ].map(card => (
+          <div key={card.label} className="stat-card" style={{padding:'12px 14px',background:'#fff'}}>
+            <div className={`num ${card.tone}`} style={{fontSize:typeof card.value === 'number' ? 22 : 15,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{card.value}</div>
+            <div className="lbl">{card.label}</div>
+            <div className="helper">{card.helper}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="panel" style={{padding:12,marginBottom:14,background:'#f8fafc'}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:8}}>
+          {[
+            { label: '1 Master hours', detail: `${workers.length} active workers`, href: null, action: locked ? 'Read only' : 'Open' },
+            { label: '2 Cell review', detail: conflictCount > 0 ? `${conflictCount} grid conflicts` : 'Grid clear', href: null, action: conflictCount > 0 ? 'Needs action' : 'OK' },
+            { label: '3 Client compare', detail: pendingReconciliationCount > 0 ? `${pendingReconciliationCount} external conflicts` : 'External clear', href: reconcileHref, action: 'Open conflicts' },
+            { label: '4 Payroll', detail: payrollGateLabel, href: '/payroll-run', action: 'Open payroll' },
+          ].map(step => (
+            <div key={step.label} style={{background:'#fff',border:'1px solid var(--border)',borderRadius:8,padding:'10px 12px',minHeight:86}}>
+              <div style={{fontSize:12,fontWeight:800,color:'#0f172a'}}>{step.label}</div>
+              <div style={{fontSize:12,color:'var(--muted)',marginTop:4,minHeight:18}}>{step.detail}</div>
+              {step.href ? <Link href={step.href} className="btn btn-secondary btn-sm" style={{marginTop:8}}>{step.action}</Link> : <div style={{fontSize:11,fontWeight:700,color:step.action === 'Needs action' ? 'var(--danger)' : 'var(--teal)',marginTop:10}}>{step.action}</div>}
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* Toolbar */}
       <div style={{display:'flex',flexWrap:'wrap',gap:10,alignItems:'center',marginBottom:16,background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,padding:'10px 14px'}}>
@@ -426,6 +526,7 @@ function TimesheetGridContent() {
           <input type="checkbox" checked={showConflictsOnly} onChange={e => setShowConflictsOnly(e.target.checked)} />
           Show only conflicts
         </label>
+        <button onClick={handleDownloadTemplate} disabled={!hasTimesheetContext} title={!hasTimesheetContext ? 'Select a client timesheet first' : 'Download a standard IWS monthly timesheet'} className="btn btn-secondary btn-sm" style={{opacity:hasTimesheetContext?1:0.45}}>Download Template</button>
         {canEdit && !locked && <>
           <label style={{display:'inline-block',padding:'4px 10px',background:'#e0f2fe',color:'#0369a1',borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:600}}>
             Upload Excel
@@ -433,15 +534,30 @@ function TimesheetGridContent() {
           </label>
           <button onClick={handleSaveAll} style={{padding:'4px 10px',background:'#0d9488',color:'white',border:'none',borderRadius:6,fontSize:11,fontWeight:600,cursor:'pointer'}}>Save All</button>
         </>}
-        <button disabled={conflictCount > 0 || locked || !canEdit}
-          title={conflictCount > 0 ? `Resolve all ${conflictCount} conflicts before generating payroll` : locked ? 'Payroll already generated' : ''}
+        <Link href={reconcileHref} className="btn btn-secondary btn-sm">Open Conflicts</Link>
+        <Link href="/payroll-run" className="btn btn-secondary btn-sm">Payroll Run</Link>
+        <button disabled={hasPayrollBlockers || locked || !canEdit}
+          title={!hasTimesheetContext ? 'Select a client with active workers before generating payroll' : conflictCount > 0 ? `Resolve all ${conflictCount} grid conflicts before generating payroll` : pendingReconciliationCount > 0 ? `Resolve ${pendingReconciliationCount} client conflicts before generating payroll` : unsavedCount > 0 ? 'Save all edited cells before generating payroll' : locked ? 'Payroll already generated' : ''}
           onClick={handleGeneratePayroll}
-          style={{padding:'4px 12px',background: conflictCount > 0 || locked ? '#94a3b8' : '#1e3a8a',color:'white',border:'none',borderRadius:6,fontSize:11,fontWeight:600,cursor: conflictCount > 0 || locked ? 'not-allowed' : 'pointer'}}>
+          style={{padding:'4px 12px',background: hasPayrollBlockers || locked ? '#94a3b8' : '#1e3a8a',color:'white',border:'none',borderRadius:6,fontSize:11,fontWeight:600,cursor: hasPayrollBlockers || locked ? 'not-allowed' : 'pointer'}}>
           {locked ? 'Payroll Locked' : 'Generate Payroll'}
         </button>
       </div>
 
       {locked && <div style={{background:'#fef2f2',border:'2px solid #fca5a5',borderRadius:8,padding:'10px 16px',marginBottom:16,fontSize:13,color:'#991b1b',fontWeight:600}}>Payroll has been generated for {MONTH_NAMES[month-1]} {year}. Grid is read-only. Contact Owner to unlock.</div>}
+
+      {!locked && pendingReconciliationCount > 0 && (
+        <div style={{background:'#fff7ed',border:'1px solid #fdba74',borderRadius:8,padding:'10px 16px',marginBottom:16,fontSize:13,color:'#9a3412',fontWeight:600,display:'flex',justifyContent:'space-between',gap:12,alignItems:'center'}}>
+          <span>{pendingReconciliationCount} client/supplier timesheet conflict{pendingReconciliationCount === 1 ? '' : 's'} must be resolved before payroll exports.</span>
+          <Link href={reconcileHref} className="btn btn-secondary btn-sm">Resolve now</Link>
+        </div>
+      )}
+
+      {!locked && unsavedCount > 0 && (
+        <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,padding:'10px 16px',marginBottom:16,fontSize:13,color:'#1d4ed8',fontWeight:600}}>
+          {unsavedCount} edited cell{unsavedCount === 1 ? '' : 's'} still saving or waiting for Save All.
+        </div>
+      )}
 
       {pendingImport && (
         <div style={{background:'#fff7ed',border:'1px solid #fdba74',borderRadius:8,padding:'12px 16px',marginBottom:16}}>
@@ -450,6 +566,9 @@ function TimesheetGridContent() {
               <div style={{fontSize:13,fontWeight:700,color:'#9a3412'}}>Review Excel import before applying</div>
               <div style={{fontSize:12,color:'#7c2d12',marginTop:2}}>
                 {pendingImport.fileName} - {pendingImport.matched.filter(m => m.iwsWorker).length}/{pendingImport.matched.length} workers matched - {Math.round(pendingImport.parsed.total_hours * 10) / 10} total hours
+              </div>
+              <div style={{fontSize:12,color:'#7c2d12',marginTop:4}}>
+                Period detected: {pendingImport.validation.file_month}. Selected period: {pendingImport.validation.selected_month}.
               </div>
               {!pendingImport.validation.valid && (
                 <div style={{fontSize:12,color:pendingImport.validation.error ? '#b91c1c' : '#92400e',marginTop:6,fontWeight:600}}>
@@ -471,13 +590,14 @@ function TimesheetGridContent() {
           )}
           <div className="table-wrap" style={{maxHeight:220,overflow:'auto',border:'1px solid #fed7aa',borderRadius:6}}>
             <table>
-              <thead><tr><th>Imported worker</th><th>IWS match</th><th>Confidence</th><th>Days</th><th>Total hours</th></tr></thead>
+              <thead><tr><th>Imported worker</th><th>Worker ID</th><th>IWS match</th><th>Match</th><th>Days</th><th>Total hours</th></tr></thead>
               <tbody>
                 {pendingImport.matched.map((row, idx) => (
                   <tr key={`${row.worker_name}-${idx}`}>
                     <td>{row.worker_name}<div style={{fontSize:11,color:'var(--muted)'}}>{row.trade || '-'}</div></td>
+                    <td>{row.client_worker_id || <span style={{color:'var(--hint)'}}>-</span>}</td>
                     <td>{row.iwsWorker ? `${row.iwsWorker.full_name} (${row.iwsWorker.worker_number})` : <span style={{color:'#b91c1c',fontWeight:700}}>Not matched</span>}</td>
-                    <td>{row.confidence || '-'}</td>
+                    <td>{row.confidence === 'worker_id' ? 'Worker ID' : row.confidence || '-'}</td>
                     <td>{row.nonZeroDays}</td>
                     <td>{Math.round(Number(row.total_hours || 0) * 10) / 10}</td>
                   </tr>
@@ -500,8 +620,8 @@ function TimesheetGridContent() {
         {[
           { label: '1 Import or enter', active: !locked, detail: pendingImport ? 'Review import before applying' : 'Manual grid or Excel' },
           { label: '2 Resolve conflicts', active: conflictCount > 0, detail: conflictCount > 0 ? `${conflictCount} needs action` : 'No open conflicts' },
-          { label: '3 Reconcile', active: false, detail: 'Compare client sheet separately' },
-          { label: '4 Generate payroll', active: !locked && conflictCount === 0 && canEdit, detail: locked ? 'Payroll locked' : conflictCount > 0 ? 'Blocked by conflicts' : 'Ready when hours are final' },
+          { label: '3 Reconcile', active: pendingReconciliationCount > 0, detail: pendingReconciliationCount > 0 ? `${pendingReconciliationCount} external conflicts` : 'Client compare clear' },
+          { label: '4 Generate payroll', active: !locked && !hasPayrollBlockers && canEdit, detail: locked ? 'Payroll locked' : !hasTimesheetContext ? 'Select a client timesheet' : hasPayrollBlockers ? 'Blocked' : 'Ready when hours are final' },
         ].map(step => (
           <div key={step.label} style={{border:'1px solid '+(step.active ? '#0d9488' : '#e2e8f0'),background:step.active ? '#f0fdfa' : '#fff',borderRadius:8,padding:'10px 12px'}}>
             <div style={{fontSize:12,fontWeight:700,color:step.active ? '#0f766e' : '#334155'}}>{step.label}</div>

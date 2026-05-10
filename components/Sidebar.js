@@ -29,10 +29,10 @@ const navSections = [
     { href:'/attendance', label:'Attendance', module:'attendance' },
     { href:'/inbox', label:'HR Inbox', module:'inbox' },
   ]},
-  { title:'TIMESHEETS & PAYROLL', items:[
-    { href:'/timesheets', label:'Timesheets', module:'timesheets' },
-    { href:'/timesheet-reconcile', label:'Reconciliation', module:'timesheet-reconcile' },
-    { href:'/payroll-run', label:'⚡ Run Payroll', module:'payroll-run' },
+  { title:'MONTHLY OPERATIONS', items:[
+    { href:'/timesheets/grid', label:'Master Timesheet', module:'timesheets' },
+    { href:'/timesheet-reconcile', label:'Timesheet Conflicts', module:'timesheet-reconcile' },
+    { href:'/payroll-run', label:'Run Payroll', module:'payroll-run' },
     { href:'/payroll', label:'Payroll', module:'payroll' },
     { href:'/payroll-settings', label:'Payroll Settings', module:'payroll-settings' },
   ]},
@@ -83,7 +83,7 @@ export default function Sidebar({ alertDots = {} }) {
                 style={{width:'100%',border:0,background:'transparent',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:9,fontWeight:700,color:'var(--hint)',textTransform:'uppercase',letterSpacing:'0.8px',padding:'8px 10px 4px',marginTop:si>0?4:0,cursor:'pointer'}}
               >
                 <span>{section.title}</span>
-                <span>{openSections[si] ? 'v' : '>'}</span>
+                <span>{openSections[si] ? '-' : '+'}</span>
               </button>
             )}
             {openSections[si] && section.items.filter(item => !mounted || canAccess(item.module)).map(item => {

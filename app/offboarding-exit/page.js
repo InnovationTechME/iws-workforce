@@ -14,9 +14,10 @@ import {
   startOffboarding,
   updateOffboarding,
 } from '../../lib/offboardingService'
+import { addLetter } from '../../lib/letterService'
 import { getPayrollByWorker } from '../../lib/payrollService'
-import { upsertDocument } from '../../lib/documentService'
-import { uploadWorkerDocument } from '../../lib/storageService'
+import { getDocumentsByWorker, upsertDocument } from '../../lib/documentService'
+import { getSignedUrl, uploadGeneratedLetter, uploadWorkerDocument } from '../../lib/storageService'
 import { supabase } from '../../lib/supabaseClient'
 import { formatCurrency, formatDate } from '../../lib/utils'
 
@@ -27,6 +28,22 @@ const EXIT_DOC_OPTIONS = [
   { value: 'exit_clearance', label: 'Exit Clearance' },
   { value: 'final_payslip', label: 'Final Payslip' },
 ]
+
+const EXIT_DOC_TYPES = new Set(EXIT_DOC_OPTIONS.map(option => option.value))
+const EXIT_DOC_CHECKLIST_MAP = {
+  exit_clearance: 'exit_clearance_signed',
+  final_payslip: 'final_payslip_issued',
+}
+
+const CHECKLIST_HELP = {
+  medical_insurance_cancelled: 'Cancel direct staff insurance, or confirm supplier insurance closure for supplier workers.',
+  c3_card_cancelled: 'Confirm C3/WPS card cancellation where applicable.',
+  final_payslip_issued: 'Upload final payslip or mark issued after payroll confirmation.',
+  eos_approved: 'Finance approval only. Do not tick from draft worksheet alone.',
+  exit_clearance_signed: 'Upload signed exit clearance or mark after physical clearance is signed.',
+  visa_cancellation_initiated: 'Record visa cancellation or supplier confirmation.',
+  labour_card_cancelled: 'Record MOHRE/labour card cancellation where applicable.',
+}
 
 const MAX_EXIT_FILE_SIZE = 10 * 1024 * 1024
 const EXIT_FILE_TYPES = ['application/pdf', 'image/jpeg', 'image/png']
@@ -50,8 +67,8 @@ function defaultExitDocType(reason) {
 }
 
 function refFor(prefix, workerNumber) {
-  const day = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  return `IT-${prefix}-${workerNumber || 'WORKER'}-${day}`
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
+  return `IT-${prefix}-${workerNumber || 'WORKER'}-${stamp}`
 }
 
 function validateExitFile(file) {
@@ -59,6 +76,14 @@ function validateExitFile(file) {
   if (!EXIT_FILE_TYPES.includes(file.type)) return 'Use PDF, JPG, or PNG only.'
   if (file.size > MAX_EXIT_FILE_SIZE) return 'File must be 10 MB or smaller.'
   return null
+}
+
+function withTimeout(promise, label, timeoutMs = 9000) {
+  let timeoutId
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId))
 }
 
 function calculateServiceGratuity(worker, lastWorkingDate) {
@@ -93,18 +118,53 @@ function getTrackLabel(worker) {
   return TRACK_LABELS[track] || track || 'Worker'
 }
 
-function getStepState(record) {
+function exitDocLabel(docType) {
+  return EXIT_DOC_OPTIONS.find(option => option.value === docType)?.label || String(docType || 'Document').replace(/_/g, ' ')
+}
+
+function getStepState(record, exitDocuments = []) {
   const checklist = record?.checklist || {}
-  const hasExitDocument = checklist.final_payslip_issued?.done || checklist.eos_approved?.done
-  const hasClearance = checklist.exit_clearance_signed?.done
+  const hasNotice = exitDocuments.some(doc => ['resignation_letter', 'termination_notice'].includes(doc.doc_type))
+  const hasFinalPayslip = checklist.final_payslip_issued?.done || exitDocuments.some(doc => doc.doc_type === 'final_payslip')
+  const hasClearance = checklist.exit_clearance_signed?.done || exitDocuments.some(doc => doc.doc_type === 'exit_clearance')
   const hasSettlement = Number(record?.eos_amount || 0) > 0 || checklist.eos_approved?.done
   return {
     initiated: true,
-    documents: checklist.final_payslip_issued?.done || checklist.visa_cancellation_initiated?.done || hasExitDocument,
+    documents: hasNotice || hasFinalPayslip,
     settlement: hasSettlement,
     clearance: hasClearance,
     closure: record?.status === 'closed',
   }
+}
+
+function nextActionFor(record, exitDocuments) {
+  if (!record) return 'Select an offboarding file to continue.'
+  const steps = getStepState(record, exitDocuments)
+  if (!steps.documents) return 'Upload or generate the resignation/termination document, then attach the signed copy.'
+  if (!steps.settlement) return 'Prepare the draft settlement worksheet and send it for finance approval.'
+  if (!steps.clearance) return 'Upload the signed exit clearance.'
+  const result = canCloseOffboardingRecord(record)
+  if (!result.can) return `${result.missing.length} required checklist item${result.missing.length > 1 ? 's remain' : ' remains'} before closure.`
+  return 'Ready for final file closure.'
+}
+
+function recordMetaFor(kind, selected, worker, ref, today) {
+  const base = {
+    ref_number: ref,
+    worker_id: worker.id,
+    worker_name: worker.full_name || selected.worker_name,
+    worker_number: worker.worker_number || selected.worker_number,
+    language: 'english',
+    issued_date: today,
+    issued_by: 'Offboarding',
+    linked_record_id: selected.id,
+  }
+  if (kind === 'resignation') return { ...base, letter_type: 'resignation_acceptance', status: 'issued', notes: `Generated from offboarding file (${selected.reason}).` }
+  if (kind === 'termination') return { ...base, letter_type: selected.reason === 'Absconding' ? 'termination_no_notice' : 'termination_notice', status: 'issued', notes: `Generated from offboarding file (${selected.reason}).` }
+  if (kind === 'experience') return { ...base, letter_type: 'experience_letter', status: 'issued', notes: 'Generated from offboarding file.' }
+  if (kind === 'clearance') return { ...base, letter_type: 'memo', status: 'issued', notes: 'Exit clearance generated from offboarding file.' }
+  if (kind === 'settlement') return { ...base, letter_type: 'memo', status: 'draft', notes: 'Draft settlement worksheet generated from offboarding file. Finance approval remains separate.' }
+  return { ...base, letter_type: 'memo', status: 'issued', notes: 'Generated from offboarding file.' }
 }
 
 export default function OffboardingExitPage() {
@@ -119,10 +179,14 @@ export default function OffboardingExitPage() {
   const [exitDocType, setExitDocType] = useState(defaultExitDocType('Resignation'))
   const [detailFile, setDetailFile] = useState(null)
   const [detailDocType, setDetailDocType] = useState('eos_calculation')
+  const [exitDocuments, setExitDocuments] = useState([])
   const [payrollLines, setPayrollLines] = useState([])
   const [settlement, setSettlement] = useState({ gratuity: 0, finalPayroll: 0, leavePay: 0, manualAdjustments: 0, deductions: 0, amount: 0 })
   const [viewerHtml, setViewerHtml] = useState(null)
   const [viewerRef, setViewerRef] = useState('')
+  const [viewerRecord, setViewerRecord] = useState(null)
+  const [viewerSaved, setViewerSaved] = useState(false)
+  const [viewerSaving, setViewerSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -131,18 +195,30 @@ export default function OffboardingExitPage() {
     setLoading(true)
     setError('')
     try {
-      const [{ data: activeWorkers, error: workersError }, offboardingRows] = await Promise.all([
-        supabase
-          .from('workers')
-          .select('*')
-          .eq('status', 'active')
-          .order('worker_number'),
-        getOffboardingRecords(),
+      const [workerResult, offboardingResult] = await Promise.allSettled([
+        withTimeout(
+          supabase
+            .from('workers')
+            .select('*')
+            .eq('status', 'active')
+            .order('worker_number')
+            .then(({ data, error }) => {
+              if (error) throw error
+              return data || []
+            }),
+          'active workers'
+        ),
+        withTimeout(getOffboardingRecords(), 'offboarding records'),
       ])
-      if (workersError) throw workersError
-      setWorkers(activeWorkers || [])
+      const activeWorkers = workerResult.status === 'fulfilled' ? workerResult.value : []
+      const offboardingRows = offboardingResult.status === 'fulfilled' ? offboardingResult.value : []
+      const failures = [workerResult, offboardingResult]
+        .filter(result => result.status === 'rejected')
+        .map(result => result.reason?.message || 'load failed')
+      setWorkers(activeWorkers)
       setRecords(offboardingRows)
       if (selectedId) setSelected(offboardingRows.find(o => o.id === selectedId) || null)
+      if (failures.length) setError(`Some offboarding data did not load: ${failures.join('; ')}`)
     } catch (err) {
       console.error('Failed to load offboarding records', err)
       setError(err.message || 'Failed to load offboarding records')
@@ -190,6 +266,30 @@ export default function OffboardingExitPage() {
     return () => { cancelled = true }
   }, [selected?.worker_id])
 
+  useEffect(() => {
+    if (!selected?.worker_id) {
+      setExitDocuments([])
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const docs = await getDocumentsByWorker(selected.worker_id)
+        const rows = await Promise.all((docs || [])
+          .filter(doc => EXIT_DOC_TYPES.has(doc.doc_type) && doc.file_url)
+          .map(async doc => ({
+            ...doc,
+            signedUrl: await getSignedUrl(doc.file_url),
+          })))
+        if (!cancelled) setExitDocuments(rows)
+      } catch (err) {
+        console.error('Failed to load offboarding documents', err)
+        if (!cancelled) setExitDocuments([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [selected?.worker_id])
+
   async function refresh() {
     await load(selected?.id)
   }
@@ -204,7 +304,7 @@ export default function OffboardingExitPage() {
     setBusy(true)
     setError('')
     try {
-      await startOffboarding(form.worker_id, {
+      const created = await startOffboarding(form.worker_id, {
         reason: form.reason,
         last_working_date: form.last_working_date,
       })
@@ -222,7 +322,7 @@ export default function OffboardingExitPage() {
           updated_at: new Date().toISOString(),
         })
       }
-      await refresh()
+      await load(created.id)
       setShowInitiate(false)
       setForm({ worker_id: '', reason: 'Resignation', last_working_date: '' })
       setExitFile(null)
@@ -272,6 +372,10 @@ export default function OffboardingExitPage() {
         notes: `Uploaded from Offboarding (${selected.reason})`,
         updated_at: new Date().toISOString(),
       })
+      const checklistKey = EXIT_DOC_CHECKLIST_MAP[detailDocType]
+      if (checklistKey && !selected[checklistKey]) {
+        await updateOffboarding(selected.id, { [checklistKey]: true })
+      }
       setDetailFile(null)
       await refresh()
     } catch (err) {
@@ -346,6 +450,26 @@ export default function OffboardingExitPage() {
     }
     setViewerRef(ref)
     setViewerHtml(html)
+    setViewerRecord(recordMetaFor(kind, selected, worker, ref, today))
+    setViewerSaved(false)
+  }
+
+  async function handleSaveGeneratedRecord() {
+    if (!viewerRecord || !viewerHtml || viewerSaved) return
+    setViewerSaving(true)
+    setError('')
+    try {
+      const { generateHTMLPDF } = await import('../../lib/payslipPDF')
+      const pdfBlob = await generateHTMLPDF(viewerHtml)
+      const fileUrl = await uploadGeneratedLetter(viewerRecord.ref_number, pdfBlob)
+      await addLetter({ ...viewerRecord, file_url: fileUrl })
+      setViewerSaved(true)
+    } catch (err) {
+      console.error('Failed to save generated offboarding document record', err)
+      setError(err.message || 'Failed to save generated document record')
+    } finally {
+      setViewerSaving(false)
+    }
   }
 
   function handleTryClose() {
@@ -389,7 +513,7 @@ export default function OffboardingExitPage() {
       <PageHeader
         eyebrow="Offboarding"
         title="Offboarding"
-        description="Run worker exits through documents, payroll settlement, clearance, and final file closure."
+        description="Run worker exits through notice, document capture, draft settlement, clearance, and final file closure."
         actions={<button className="btn btn-danger" onClick={() => setShowInitiate(true)} disabled={busy}>+ Initiate Offboarding</button>}
       />
 
@@ -451,7 +575,7 @@ export default function OffboardingExitPage() {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8, marginBottom: 14 }}>
               {(() => {
-                const stepState = getStepState(selected)
+                const stepState = getStepState(selected, exitDocuments)
                 return STEP_DEFINITIONS.map((step, index) => {
                   const complete = Boolean(stepState[step.key])
                   return (
@@ -464,6 +588,10 @@ export default function OffboardingExitPage() {
               })()}
             </div>
 
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 12px', marginBottom: 14, fontSize: 12, color: '#1e3a8a', lineHeight: 1.5 }}>
+              <strong>Next action:</strong> {nextActionFor(selected, exitDocuments)}
+            </div>
+
             <div style={{ background: '#f8fafc', border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>Exit Documents</div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -471,7 +599,7 @@ export default function OffboardingExitPage() {
                   ? <button className="btn btn-secondary btn-sm" onClick={() => handleGenerateDocument('resignation')}>Resignation acceptance</button>
                   : <button className="btn btn-secondary btn-sm" onClick={() => handleGenerateDocument('termination')}>Termination notice</button>}
                 <button className="btn btn-secondary btn-sm" onClick={() => handleGenerateDocument('clearance')}>Exit clearance</button>
-                <button className="btn btn-secondary btn-sm" onClick={() => handleGenerateDocument('settlement')}>Full & final settlement</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => handleGenerateDocument('settlement')}>Draft settlement worksheet</button>
                 <button className="btn btn-secondary btn-sm" onClick={() => handleGenerateDocument('experience')}>Experience letter</button>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr auto', gap: 8, alignItems: 'center' }}>
@@ -481,15 +609,34 @@ export default function OffboardingExitPage() {
                 <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="form-input" onChange={e => setDetailFile(e.target.files?.[0] || null)} disabled={busy || selected.status === 'closed'} />
                 <button className="btn btn-teal btn-sm" onClick={handleUploadExitDocument} disabled={busy || selected.status === 'closed' || !detailFile}>Upload</button>
               </div>
+              {exitDocuments.length > 0 && (
+                <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>Documents on file</div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {exitDocuments.map(doc => (
+                      <div key={doc.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 9px' }}>
+                        <div>
+                          <div style={{ fontWeight: 700 }}>{exitDocLabel(doc.doc_type)}</div>
+                          <div style={{ color: 'var(--muted)', fontSize: 11 }}>{doc.uploaded_at ? `Uploaded ${formatDate(doc.uploaded_at)}` : 'Uploaded'}{doc.notes ? ` - ${doc.notes}` : ''}</div>
+                        </div>
+                        {doc.signedUrl ? <a className="btn btn-secondary btn-sm" href={doc.signedUrl} target="_blank" rel="noreferrer">View</a> : <StatusBadge label="no link" tone="neutral" />}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div style={{ background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 8, padding: 12, marginBottom: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 10 }}>
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#0f766e', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Settlement Draft</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#0f766e', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Draft settlement worksheet</div>
                   <div style={{ fontSize: 11, color: '#475569', marginTop: 3 }}>Latest payroll: {latestPayroll?.batch?.month_label || 'No payroll line found'} {latestPayroll?.batch?.status ? `(${latestPayroll.batch.status})` : ''}</div>
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#0f766e' }}>{formatCurrency(settlement.amount)}</div>
+              </div>
+              <div style={{ background: '#ccfbf1', border: '1px solid #5eead4', color: '#115e59', borderRadius: 6, padding: '8px 10px', marginBottom: 10, fontSize: 11, lineHeight: 1.5 }}>
+                This is a draft worksheet only. Finance must approve EOS/final settlement separately before ticking End-of-service approved.
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                 <div className="form-field"><label className="form-label">EOS gratuity</label><input className="form-input" type="number" value={settlement.gratuity} onChange={e => setSettlement(current => withSettlementTotal({ ...current, gratuity: e.target.value }))} /></div>
@@ -520,6 +667,7 @@ export default function OffboardingExitPage() {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13, fontWeight: isDone ? 400 : 500, color: isDone ? 'var(--muted)' : 'var(--text)', textDecoration: isDone ? 'line-through' : 'none' }}>{item.label}</div>
                       {isDone && <div style={{ fontSize: 10, color: 'var(--hint)' }}>Complete</div>}
+                      {!isDone && CHECKLIST_HELP[item.key] && <div style={{ fontSize: 10, color: 'var(--hint)', marginTop: 2 }}>{CHECKLIST_HELP[item.key]}</div>}
                     </div>
                     {item.required
                       ? <span style={{ fontSize: 9, fontWeight: 700, color: '#dc2626', background: '#fee2e2', padding: '2px 6px', borderRadius: 10 }}>REQUIRED</span>
@@ -574,7 +722,16 @@ export default function OffboardingExitPage() {
           ? <ConfirmDialog title="Close worker file?" message="All required checklist items are complete. This will mark the worker as inactive and close their file. This action cannot be undone." confirmLabel="Close File" confirmTone="btn-danger" onConfirm={handleConfirmClose} onCancel={() => setShowCloseConfirm(false)} />
           : <ConfirmDialog title="Cannot close file" message={`${closeResult.missing.length} required item${closeResult.missing.length > 1 ? 's are' : ' is'} not yet complete. All required items must be ticked before the file can be closed.`} confirmLabel="OK" confirmTone="btn-secondary" onConfirm={() => setShowCloseConfirm(false)} onCancel={() => setShowCloseConfirm(false)} />
       )}
-      {viewerHtml && <LetterViewer html={viewerHtml} refNumber={viewerRef} onClose={() => { setViewerHtml(null); setViewerRef('') }} />}
+      {viewerHtml && (
+        <LetterViewer
+          html={viewerHtml}
+          refNumber={viewerRef}
+          onClose={() => { setViewerHtml(null); setViewerRef(''); setViewerRecord(null); setViewerSaved(false) }}
+          onSaveRecord={handleSaveGeneratedRecord}
+          saveRecordLabel={viewerSaving ? 'Saving...' : viewerSaved ? 'Saved to records' : 'Save to records'}
+          saveRecordDisabled={viewerSaving || viewerSaved}
+        />
+      )}
     </AppShell>
   )
 }

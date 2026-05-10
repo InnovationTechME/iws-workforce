@@ -5,6 +5,9 @@ import { uploadWorkerDocument } from '../lib/storageService'
 
 export const EXPIRY_REQUIRED = ['uae_visa', 'emirates_id', 'passport_copy', 'health_insurance', 'workmen_compensation', 'medical_fitness', 'labour_card', 'iloe_certificate']
 export const NO_EXPIRY = ['passport_photo', 'offer_letter', 'employment_contract', 'worker_policy_manual', 'passport_safekeeping']
+const MAX_FILE_SIZE_MB = 10
+const ALLOWED_FILE_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png'])
+const ALLOWED_FILE_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png'])
 
 const todayStr = () => new Date().toISOString().split('T')[0]
 const tomorrowStr = () => new Date(Date.now() + 86400000).toISOString().split('T')[0]
@@ -12,6 +15,15 @@ const tomorrowStr = () => new Date(Date.now() + 86400000).toISOString().split('T
 export function validateUploadForm(file, expiryDate, highlightConfirmed, docType) {
   const errors = []
   if (!file) errors.push('Please select a file')
+  if (file) {
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (!ALLOWED_FILE_TYPES.has(file.type) && !ALLOWED_FILE_EXTENSIONS.has(ext)) {
+      errors.push('Only PDF, JPG, JPEG, or PNG files are allowed')
+    }
+    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+      errors.push(`File must be ${MAX_FILE_SIZE_MB} MB or smaller`)
+    }
+  }
   if (EXPIRY_REQUIRED.includes(docType)) {
     if (!expiryDate) errors.push('Expiry date is required for this document')
     else if (expiryDate <= todayStr()) errors.push('Expiry date must be a future date')

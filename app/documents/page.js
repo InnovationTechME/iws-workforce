@@ -12,6 +12,9 @@ import { DOCUMENT_TYPE_OPTIONS, getDocumentTypeOption, isDocumentExpiryRequired,
 import { formatDate, getStatusTone, getDocumentStatus, validateRequired, validateExpiryAfterIssue, validateDateNotPast } from '../../lib/utils'
 
 const CATEGORIES = ['personal','employment','compliance','site','subcontractor','termination']
+const MAX_FILE_SIZE_MB = 10
+const ALLOWED_FILE_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png'])
+const ALLOWED_FILE_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png'])
 const HIDE_ISSUE_DATE_DOCUMENTS = new Set(['passport_copy', 'emirates_id'])
 const DOCUMENT_FIELD_CONFIG = {
   passport_copy: [
@@ -96,6 +99,18 @@ function statusForDocument(expiryDate, docType, hasFile) {
   if (!hasFile) return 'missing'
   if (!isDocumentExpiryRequired(docType)) return 'valid'
   return getDocumentStatus(expiryDate, docType)
+}
+
+function validateDocumentFile(file) {
+  if (!file) return null
+  const ext = file.name.split('.').pop()?.toLowerCase()
+  if (!ALLOWED_FILE_TYPES.has(file.type) && !ALLOWED_FILE_EXTENSIONS.has(ext)) {
+    return 'Only PDF, JPG, JPEG, or PNG files are allowed'
+  }
+  if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+    return `File must be ${MAX_FILE_SIZE_MB} MB or smaller`
+  }
+  return null
 }
 
 function DocumentMetadataFields({ docType, values, onChange }) {
@@ -249,6 +264,8 @@ export default function DocumentsPage() {
     try {
       let fileUrl = selectedDoc.file_url || null
       if (docDrawerForm.file) {
+        const fileError = validateDocumentFile(docDrawerForm.file)
+        if (fileError) throw new Error(fileError)
         if (!worker?.worker_number) throw new Error('Worker data missing - cannot upload file')
         const { path, bucket } = await uploadWorkerDocument(worker, docType, docDrawerForm.file)
         fileUrl = `${bucket}::${path}`
@@ -266,7 +283,10 @@ export default function DocumentsPage() {
         ...metadataPayloadFor(docType, docDrawerForm),
       })
       await reloadDocs()
-    } catch (err) { setLoadError(err?.message || 'Failed to save document') }
+    } catch (err) {
+      setLoadError(err?.message || 'Failed to save document')
+      return
+    }
     setSelectedDoc(null)
   }
 
@@ -288,6 +308,8 @@ export default function DocumentsPage() {
       const worker = workers.find(w => w.id === form.worker_id)
       let fileUrl = null
       if (form.file_blob) {
+        const fileError = validateDocumentFile(form.file_blob)
+        if (fileError) throw new Error(fileError)
         if (!worker?.worker_number) throw new Error('Worker data missing - cannot upload file')
         const { path, bucket } = await uploadWorkerDocument(worker, docType, form.file_blob)
         fileUrl = `${bucket}::${path}`
@@ -319,6 +341,12 @@ export default function DocumentsPage() {
     <AppShell pageTitle="Documents">
       <PageHeader eyebrow="Documents" title="Document risk queue" description="Work the document queue by status — missing, expired, expiring, and contracts due."
         actions={<button className="btn btn-primary" onClick={() => setShowDrawer(true)}>+ Add Document</button>} />
+
+      {loadError && (
+        <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,padding:'10px 12px',fontSize:12,color:'var(--danger)',marginBottom:10,fontWeight:600}}>
+          {loadError}
+        </div>
+      )}
 
       <div className="summary-strip">
         {[['Missing',queues.missing.length,'danger'],['Expired',queues.expired.length,'danger'],['Expiring soon',queues.expiring_soon.length,'warning'],['Contracts due',queues.contracts_due.length,'warning'],].map(([label,count,tone]) => (

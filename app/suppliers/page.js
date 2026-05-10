@@ -5,7 +5,7 @@ import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
 import DrawerForm from '../../components/DrawerForm'
-import { addSupplier, addSupplierRate, getSuppliers, getSupplierRates, getSupplierWorkers, getAllSupplierSummaries, updateSupplier, updateSupplierSummary } from '../../lib/supplierService'
+import { addSupplier, addSupplierRate, assignWorkerToSupplier, getSuppliers, getSupplierRates, getSupplierWorkers, getAllSupplierSummaries, getUnlinkedSupplierWorkers, updateSupplier, updateSupplierSummary } from '../../lib/supplierService'
 import { getRole } from '../../lib/mockAuth'
 import { formatCurrency, formatDate } from '../../lib/utils'
 
@@ -160,6 +160,7 @@ export default function SuppliersPage() {
   const [tab, setTab] = useState('suppliers')
   const [suppliers, setSuppliers] = useState([])
   const [summaries, setSummaries] = useState([])
+  const [unlinkedWorkers, setUnlinkedWorkers] = useState([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -168,23 +169,72 @@ export default function SuppliersPage() {
   const [formError, setFormError] = useState('')
   const [invoiceFor, setInvoiceFor] = useState(null)
   const [invoiceForm, setInvoiceForm] = useState({ invoice_number:'', invoice_amount:'', invoice_date:'' })
+  const [repairOpen, setRepairOpen] = useState(false)
+  const [repairForm, setRepairForm] = useState({ worker_id:'', supplier_id:'', rate_id:'' })
+  const [repairRates, setRepairRates] = useState([])
+  const [repairError, setRepairError] = useState('')
+  const [search, setSearch] = useState('')
+  const [summaryStatus, setSummaryStatus] = useState('all')
 
   const refresh = async () => {
     setLoading(true)
     try {
-      const [s, sm] = await Promise.all([getSuppliers(), getAllSupplierSummaries()])
+      const [s, sm, unlinked] = await Promise.all([getSuppliers(), getAllSupplierSummaries(), getUnlinkedSupplierWorkers()])
       setSuppliers(s || [])
       setSummaries(sm || [])
+      setUnlinkedWorkers(unlinked || [])
     } catch (err) {
       console.error('Failed to load suppliers', err)
       setSuppliers([])
       setSummaries([])
+      setUnlinkedWorkers([])
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => { refresh() }, [])
+
+  const openRepair = (worker) => {
+    setRepairError('')
+    setRepairRates([])
+    setRepairForm({ worker_id: worker?.id || '', supplier_id: '', rate_id: '' })
+    setRepairOpen(true)
+  }
+
+  const handleRepairSupplierChange = async (supplierId) => {
+    setRepairForm(f => ({ ...f, supplier_id: supplierId, rate_id: '' }))
+    setRepairRates([])
+    if (!supplierId) return
+    const rows = await getSupplierRates(supplierId)
+    setRepairRates(rows || [])
+  }
+
+  const handleAssignSupplier = async () => {
+    if (!repairForm.worker_id) {
+      setRepairError('Select a worker')
+      return
+    }
+    if (!repairForm.supplier_id) {
+      setRepairError('Select a supplier company')
+      return
+    }
+    const rate = repairRates.find(r => r.id === repairForm.rate_id)
+    if (!rate) {
+      setRepairError('Select one agreed supplier rate')
+      return
+    }
+    setRepairError('')
+    const saved = await assignWorkerToSupplier(repairForm.worker_id, repairForm.supplier_id, rate)
+    if (!saved?.id) {
+      setRepairError('Could not assign supplier to worker')
+      return
+    }
+    setRepairOpen(false)
+    setRepairForm({ worker_id:'', supplier_id:'', rate_id:'' })
+    setRepairRates([])
+    await refresh()
+  }
 
   const handleEdit = (supplier) => {
     setEditing(supplier)
@@ -284,6 +334,19 @@ export default function SuppliersPage() {
   }
 
   const statusTone = (s) => ({ draft:'neutral', sent:'info', invoiced:'warning', paid:'success' }[s] || 'neutral')
+  const filteredSuppliers = suppliers.filter(s => {
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return [s.name, s.trade_speciality, s.po_number, s.contact_person, s.email, s.phone]
+      .some(v => String(v || '').toLowerCase().includes(q))
+  })
+  const filteredSummaries = summaries.filter(row => {
+    if (summaryStatus !== 'all' && (row.status || 'draft') !== summaryStatus) return false
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return [row.supplier?.name, row.po_number, row.supplier?.po_number, row.invoice_number, row.month_label]
+      .some(v => String(v || '').toLowerCase().includes(q))
+  })
 
   return (
     <AppShell pageTitle="Suppliers">
@@ -298,6 +361,19 @@ export default function SuppliersPage() {
         Supplier companies provide their own workers under a PO. Workers are billed hourly and tracked via monthly timesheet summaries.
       </div>
 
+      {unlinkedWorkers.length > 0 && (
+        <div style={{background:'#fff7ed',border:'1px solid #fdba74',borderRadius:8,padding:'10px 12px',fontSize:12,color:'#9a3412',marginBottom:10,lineHeight:1.5}}>
+          <div style={{fontWeight:700,marginBottom:4}}>{unlinkedWorkers.length} subcontract worker{unlinkedWorkers.length > 1 ? 's are' : ' is'} not linked to a supplier company.</div>
+          <div style={{marginBottom:6}}>They will not appear in supplier profiles, supplier timesheet filters, or supplier pay history until a supplier is assigned.</div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {unlinkedWorkers.slice(0, 4).map(w => (
+              <button key={w.id} className="btn btn-secondary btn-sm" onClick={() => openRepair(w)}>{w.worker_number} - {w.full_name}</button>
+            ))}
+            {unlinkedWorkers.length > 4 && <button className="btn btn-secondary btn-sm" onClick={() => openRepair(null)}>+{unlinkedWorkers.length - 4} more</button>}
+          </div>
+        </div>
+      )}
+
       <div style={{display:'flex',gap:4,borderBottom:'1px solid var(--border)',marginBottom:12}}>
         {[['suppliers','Suppliers & Rates'],['summaries','Monthly Summaries']].map(([k,label]) => (
           <button key={k} onClick={() => setTab(k)} className="btn btn-ghost btn-sm"
@@ -307,24 +383,37 @@ export default function SuppliersPage() {
         ))}
       </div>
 
+      <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12,flexWrap:'wrap'}}>
+        <input className="form-input" style={{maxWidth:360}} placeholder="Search supplier, PO, contact, invoice..." value={search} onChange={e => setSearch(e.target.value)} />
+        {tab === 'summaries' && (
+          <select className="filter-select" value={summaryStatus} onChange={e => setSummaryStatus(e.target.value)}>
+            <option value="all">All statuses</option>
+            <option value="draft">Draft</option>
+            <option value="sent">Sent</option>
+            <option value="invoiced">Invoiced</option>
+            <option value="paid">Paid</option>
+          </select>
+        )}
+      </div>
+
       {loading ? <div className="empty-state"><p>Loading…</p></div> : tab === 'suppliers' ? (
-        suppliers.length === 0 ? <div className="empty-state"><h3>No suppliers yet</h3><p>Add a supplier to start tracking rates and timesheets.</p></div> : (
+        filteredSuppliers.length === 0 ? <div className="empty-state"><h3>No suppliers found</h3><p>Add a supplier or clear the search filter.</p></div> : (
           <div style={{display:'flex',flexDirection:'column',gap:12}}>
-            {suppliers.map(s => <SupplierCard key={s.id} supplier={s} onEdit={handleEdit} />)}
+            {filteredSuppliers.map(s => <SupplierCard key={s.id} supplier={s} onEdit={handleEdit} />)}
           </div>
         )
       ) : (
         <div className="panel">
-          {summaries.length === 0 ? <div className="empty-state"><h3>No monthly summaries yet</h3></div> : (
+          {filteredSummaries.length === 0 ? <div className="empty-state"><h3>No monthly summaries found</h3><p>Generate summaries from each supplier profile or clear the filters.</p></div> : (
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Supplier</th><th>Month</th><th>Workers</th><th>Hours</th><th>Amount (AED)</th><th>PO</th><th>Status</th><th>Actions</th></tr></thead>
                 <tbody>
-                  {summaries.map(r => (
+                  {filteredSummaries.map(r => (
                     <tr key={r.id}>
-                      <td style={{fontWeight:500}}>{r.supplier?.name || '—'}</td>
+                      <td style={{fontWeight:500}}>{r.supplier?.name || '—'}{r.supplier_id && <div><Link href={`/suppliers/${r.supplier_id}`} style={{fontSize:11,color:'var(--teal)',textDecoration:'none'}}>Open supplier profile</Link></div>}</td>
                       <td>{fmtMonth(r.year, r.month)}</td>
-                      <td style={{textAlign:'right'}}>{r.worker_count ?? '—'}</td>
+                      <td style={{textAlign:'right'}}>{r.total_workers ?? r.worker_count ?? '—'}</td>
                       <td style={{textAlign:'right'}}>{r.total_hours ?? '—'}</td>
                       <td style={{textAlign:'right',fontWeight:500}}>{r.total_amount != null ? formatCurrency(r.total_amount) : '—'}</td>
                       <td style={{fontSize:12,color:'var(--muted)'}}>{r.po_number || r.supplier?.po_number || '—'}</td>
@@ -403,6 +492,41 @@ export default function SuppliersPage() {
             <div className="form-field"><label className="form-label">Invoice number</label><input className="form-input" value={invoiceForm.invoice_number} onChange={e => setInvoiceForm({...invoiceForm, invoice_number:e.target.value})} /></div>
             <div className="form-field"><label className="form-label">Invoice amount (AED)</label><input className="form-input" type="number" value={invoiceForm.invoice_amount} onChange={e => setInvoiceForm({...invoiceForm, invoice_amount:e.target.value})} /></div>
             <div className="form-field"><label className="form-label">Invoice date</label><input className="form-input" type="date" value={invoiceForm.invoice_date} onChange={e => setInvoiceForm({...invoiceForm, invoice_date:e.target.value})} /></div>
+          </div>
+        </DrawerForm>
+      )}
+      {repairOpen && (
+        <DrawerForm title="Assign Supplier" subtitle="Repair an old subcontract worker link" onClose={() => setRepairOpen(false)}
+          footer={<div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary" onClick={() => setRepairOpen(false)}>Cancel</button><button className="btn btn-primary" onClick={handleAssignSupplier}>Assign Supplier</button></div>}>
+          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            {repairError && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:6,padding:'10px 12px',fontSize:12,color:'var(--danger)',fontWeight:600}}>{repairError}</div>}
+            <div style={{background:'#f8fafc',border:'1px solid var(--border)',borderRadius:8,padding:'10px 12px',fontSize:12,color:'var(--muted)',lineHeight:1.5}}>
+              Use this only for existing subcontract workers that were created before supplier linking was enforced. The selected agreed rate becomes the worker&rsquo;s supplier rate and hourly rate snapshot.
+            </div>
+            <div className="form-field">
+              <label className="form-label">Worker *</label>
+              <select className="form-select" value={repairForm.worker_id} onChange={e => setRepairForm(f => ({ ...f, worker_id: e.target.value }))}>
+                <option value="">Select worker</option>
+                {unlinkedWorkers.map(w => (
+                  <option key={w.id} value={w.id}>{w.worker_number} - {w.full_name}{w.trade_role ? ` (${w.trade_role})` : ''}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field">
+              <label className="form-label">Supplier company *</label>
+              <select className="form-select" value={repairForm.supplier_id} onChange={e => handleRepairSupplierChange(e.target.value)}>
+                <option value="">Select supplier</option>
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div className="form-field">
+              <label className="form-label">Agreed rate *</label>
+              <select className="form-select" value={repairForm.rate_id} onChange={e => setRepairForm(f => ({ ...f, rate_id: e.target.value }))} disabled={!repairForm.supplier_id || repairRates.length === 0}>
+                <option value="">{repairForm.supplier_id ? 'Select agreed rate' : 'Select supplier first'}</option>
+                {repairRates.map(r => <option key={r.id} value={r.id}>{r.trade_role} - {formatCurrency(r.hourly_rate)}/hr</option>)}
+              </select>
+              {repairForm.supplier_id && repairRates.length === 0 && <div style={{fontSize:11,color:'#b45309',marginTop:4}}>No agreed rates are set for this supplier yet. Add a rate on the supplier card first.</div>}
+            </div>
           </div>
         </DrawerForm>
       )}

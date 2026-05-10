@@ -60,6 +60,17 @@ Before production use:
 
 Deletion must be a separate, explicit action. Do not add automatic cleanup to seed scripts.
 
+For a clean operational start, use the guarded reset helper:
+
+1. Run `npm run data:reset-plan`.
+2. Confirm the tables and counts are exactly what should be cleared.
+3. Back up Supabase and storage.
+4. Run the destructive reset only from a private local/admin session:
+   - PowerShell: `$env:IWS_ALLOW_FACTORY_RESET="true"`
+   - `npm run data:reset-operational -- --confirm=RESET-IWS-OPERATIONAL-DATA`
+
+The reset helper intentionally keeps reference/setup data such as public holidays, business rules, document type definitions, and storage buckets. It is not exposed as an in-app button.
+
 ## Demo Rebuild
 
 Use `node scripts/seedDemoLifecycle.mjs` only for development/preview databases.

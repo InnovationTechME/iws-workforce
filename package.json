@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "data:audit": "node scripts/auditDemoData.mjs",
-    "data:seed-demo": "node scripts/seedDemoLifecycle.mjs"
+    "data:seed-demo": "node scripts/seedDemoLifecycle.mjs",
+    "data:reset-plan": "node scripts/resetOperationalData.mjs",
+    "data:reset-operational": "node scripts/resetOperationalData.mjs --all-operational"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.0",

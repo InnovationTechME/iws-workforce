@@ -1,6 +1,6 @@
 'use client'
 import { useRef } from 'react'
-export default function LetterViewer({ html, onClose, refNumber }) {
+export default function LetterViewer({ html, onClose, refNumber, onSaveRecord, saveRecordLabel = 'Save to records', saveRecordDisabled = false }) {
   const iframeRef = useRef(null)
   const handlePrint = () => {
     const iframe = iframeRef.current
@@ -25,6 +25,7 @@ export default function LetterViewer({ html, onClose, refNumber }) {
         <span style={{color:'white',fontWeight:600,fontSize:13,fontFamily:'monospace'}}>{refNumber}</span>
         <button className="btn btn-teal btn-sm no-print" onClick={handlePrint}>Print / Save as PDF</button>
         <button className="btn btn-secondary btn-sm no-print" onClick={handleDownload}>Download HTML</button>
+        {onSaveRecord && <button className="btn btn-secondary btn-sm no-print" onClick={onSaveRecord} disabled={saveRecordDisabled}>{saveRecordLabel}</button>}
         <div style={{flex:1}} />
         <button className="btn btn-ghost btn-sm no-print" style={{color:'white'}} onClick={onClose}>Close</button>
       </div>

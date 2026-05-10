@@ -5,7 +5,15 @@ import { useParams } from 'next/navigation'
 import AppShell from '../../../components/AppShell'
 import PageHeader from '../../../components/PageHeader'
 import StatusBadge from '../../../components/StatusBadge'
-import { getSupplierById, getSupplierRates, getSupplierWorkers, getSupplierSummaries } from '../../../lib/supplierService'
+import {
+  addSupplierRate,
+  generateSupplierMonthlySummary,
+  getSupplierById,
+  getSupplierRates,
+  getSupplierSummaryLines,
+  getSupplierWorkers,
+  getSupplierSummaries
+} from '../../../lib/supplierService'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -32,6 +40,29 @@ export default function SupplierProfilePage() {
   const [workers, setWorkers] = useState([])
   const [summaries, setSummaries] = useState([])
   const [loading, setLoading] = useState(true)
+  const now = new Date()
+  const [reviewMonth, setReviewMonth] = useState(now.getMonth() + 1)
+  const [reviewYear, setReviewYear] = useState(now.getFullYear())
+  const [summaryLines, setSummaryLines] = useState([])
+  const [summaryLoading, setSummaryLoading] = useState(false)
+  const [summaryMsg, setSummaryMsg] = useState('')
+  const [showRateForm, setShowRateForm] = useState(false)
+  const [rateForm, setRateForm] = useState({ trade_role:'', hourly_rate:'', effective_from:new Date().toISOString().split('T')[0], notes:'' })
+  const [rateError, setRateError] = useState('')
+
+  const refreshProfile = async () => {
+    if (!supplierId) return
+    const [supplierRow, rateRows, workerRows, summaryRows] = await Promise.all([
+      getSupplierById(supplierId),
+      getSupplierRates(supplierId),
+      getSupplierWorkers(supplierId),
+      getSupplierSummaries(supplierId),
+    ])
+    setSupplier(supplierRow)
+    setRates(rateRows || [])
+    setWorkers(workerRows || [])
+    setSummaries(summaryRows || [])
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -39,12 +70,7 @@ export default function SupplierProfilePage() {
       if (!supplierId) return
       setLoading(true)
       try {
-        const [supplierRow, rateRows, workerRows, summaryRows] = await Promise.all([
-          getSupplierById(supplierId),
-          getSupplierRates(supplierId),
-          getSupplierWorkers(supplierId),
-          getSupplierSummaries(supplierId),
-        ])
+        const [supplierRow, rateRows, workerRows, summaryRows] = await Promise.all([getSupplierById(supplierId), getSupplierRates(supplierId), getSupplierWorkers(supplierId), getSupplierSummaries(supplierId)])
         if (cancelled) return
         setSupplier(supplierRow)
         setRates(rateRows || [])
@@ -57,6 +83,21 @@ export default function SupplierProfilePage() {
     return () => { cancelled = true }
   }, [supplierId])
 
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (!supplierId || !reviewMonth || !reviewYear) return
+      setSummaryLoading(true)
+      try {
+        const rows = await getSupplierSummaryLines(supplierId, Number(reviewMonth), Number(reviewYear))
+        if (!cancelled) setSummaryLines(rows || [])
+      } finally {
+        if (!cancelled) setSummaryLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [supplierId, reviewMonth, reviewYear])
+
   const totals = useMemo(() => {
     return summaries.reduce((acc, row) => {
       acc.hours += Number(row.total_hours || 0)
@@ -65,6 +106,46 @@ export default function SupplierProfilePage() {
       return acc
     }, { hours:0, amount:0, invoiced:0 })
   }, [summaries])
+
+  const reviewTotals = useMemo(() => summaryLines.reduce((acc, row) => {
+    acc.hours += Number(row.total_hours || 0)
+    acc.amount += Number(row.amount || 0)
+    if (Number(row.total_hours || 0) > 0) acc.workers += 1
+    return acc
+  }, { hours:0, amount:0, workers:0 }), [summaryLines])
+
+  const handleGenerateSummary = async () => {
+    setSummaryMsg('')
+    setSummaryLoading(true)
+    try {
+      const result = await generateSupplierMonthlySummary(supplierId, Number(reviewMonth), Number(reviewYear))
+      if (!result?.summary) {
+        setSummaryMsg('Could not generate summary from timesheet lines.')
+        return
+      }
+      setSummaryLines(result.lines || [])
+      await refreshProfile()
+      setSummaryMsg(`Saved ${result.summary.month_label} supplier summary.`)
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
+
+  const handleAddRate = async () => {
+    if (!rateForm.trade_role.trim() || !rateForm.hourly_rate) {
+      setRateError('Trade / role and hourly rate are required')
+      return
+    }
+    setRateError('')
+    const row = await addSupplierRate(supplierId, rateForm.trade_role.trim(), Number(rateForm.hourly_rate), rateForm.effective_from || new Date().toISOString().split('T')[0], rateForm.notes || null)
+    if (!row?.id) {
+      setRateError('Could not add supplier rate')
+      return
+    }
+    setRateForm({ trade_role:'', hourly_rate:'', effective_from:new Date().toISOString().split('T')[0], notes:'' })
+    setShowRateForm(false)
+    await refreshProfile()
+  }
 
   if (loading) {
     return (
@@ -110,6 +191,46 @@ export default function SupplierProfilePage() {
         <StatCard value={formatCurrency(totals.invoiced || totals.amount)} label="Invoice/pay history" />
       </div>
 
+      <div className="panel" style={{marginBottom:12,border:'1.5px solid #99f6e4'}}>
+        <div className="panel-header">
+          <div><h2>Supplier monthly command center</h2><p>Build invoice summaries from linked worker timesheets and agreed rates.</p></div>
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+            <select className="filter-select" value={reviewMonth} onChange={e => setReviewMonth(Number(e.target.value))}>
+              {MONTH_NAMES.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}
+            </select>
+            <input className="filter-select" type="number" value={reviewYear} onChange={e => setReviewYear(Number(e.target.value))} style={{width:90}} />
+            <button className="btn btn-primary btn-sm" disabled={summaryLoading} onClick={handleGenerateSummary}>{summaryLoading ? 'Checking...' : 'Generate / refresh summary'}</button>
+          </div>
+        </div>
+        {summaryMsg && <div style={{fontSize:12,color:summaryMsg.startsWith('Could')?'var(--danger)':'var(--success)',fontWeight:600,marginBottom:10}}>{summaryMsg}</div>}
+        <div className="summary-strip" style={{marginBottom:12}}>
+          <StatCard value={reviewTotals.workers} label="Workers with hours" />
+          <StatCard value={Math.round(reviewTotals.hours * 100) / 100} label="Timesheet hours" />
+          <StatCard value={formatCurrency(reviewTotals.amount)} label="Supplier amount" />
+          <StatCard value={supplier.po_number || '-'} label="PO reference" />
+        </div>
+        {summaryLines.length === 0 ? (
+          <div className="empty-state" style={{padding:20}}><h3>No supplier worker hours found</h3><p>Check that workers are linked to this supplier and hours are entered for the selected month.</p></div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Worker</th><th>Trade</th><th>Client / site</th><th style={{textAlign:'right'}}>Hours</th><th style={{textAlign:'right'}}>Rate</th><th style={{textAlign:'right'}}>Amount</th><th></th></tr></thead>
+              <tbody>{summaryLines.map(line => (
+                <tr key={line.worker_id}>
+                  <td><div style={{fontWeight:600}}>{line.full_name}</div><div style={{fontSize:12,color:'var(--muted)'}}>{line.worker_number}</div></td>
+                  <td>{line.trade_role || '-'}</td>
+                  <td style={{fontSize:12,color:'var(--muted)'}}>{line.clients.length ? line.clients.join(', ') : '-'}</td>
+                  <td style={{textAlign:'right'}}>{line.total_hours}</td>
+                  <td style={{textAlign:'right'}}>{formatCurrency(line.rate)}/hr</td>
+                  <td style={{textAlign:'right',fontWeight:600}}>{formatCurrency(line.amount)}</td>
+                  <td><Link className="btn btn-secondary btn-sm" href={`/workers/${line.worker_id}`}>Worker</Link></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr)',gap:12,marginBottom:12}}>
         <div className="panel">
           <div className="panel-header"><div><h2>Company and PO</h2><p>Contract and billing reference details.</p></div></div>
@@ -135,7 +256,22 @@ export default function SupplierProfilePage() {
       </div>
 
       <div className="panel" style={{marginBottom:12}}>
-        <div className="panel-header"><div><h2>Agreed trade rates</h2><p>Use these rates when onboarding workers from this supplier.</p></div></div>
+        <div className="panel-header">
+          <div><h2>Agreed trade rates</h2><p>Use these rates when onboarding workers from this supplier.</p></div>
+          <button className="btn btn-secondary btn-sm" onClick={() => { setRateError(''); setShowRateForm(v => !v) }}>{showRateForm ? 'Cancel rate' : '+ Add rate'}</button>
+        </div>
+        {showRateForm && (
+          <div style={{border:'1px solid var(--border)',borderRadius:8,padding:12,marginBottom:12,background:'#f8fafc'}}>
+            {rateError && <div style={{fontSize:12,color:'var(--danger)',marginBottom:8}}>{rateError}</div>}
+            <div className="form-grid">
+              <div className="form-field"><label className="form-label">Trade / role</label><input className="form-input" value={rateForm.trade_role} onChange={e => setRateForm({...rateForm, trade_role:e.target.value})} placeholder="Scaffolder, Rigger, Welder" /></div>
+              <div className="form-field"><label className="form-label">Hourly rate (AED)</label><input className="form-input" type="number" value={rateForm.hourly_rate} onChange={e => setRateForm({...rateForm, hourly_rate:e.target.value})} /></div>
+              <div className="form-field"><label className="form-label">Effective from</label><input className="form-input" type="date" value={rateForm.effective_from} onChange={e => setRateForm({...rateForm, effective_from:e.target.value})} /></div>
+              <div className="form-field"><label className="form-label">Notes</label><input className="form-input" value={rateForm.notes} onChange={e => setRateForm({...rateForm, notes:e.target.value})} /></div>
+            </div>
+            <div style={{display:'flex',justifyContent:'flex-end',marginTop:8}}><button className="btn btn-teal btn-sm" onClick={handleAddRate}>Save rate</button></div>
+          </div>
+        )}
         {rates.length === 0 ? (
           <div className="empty-state"><h3>No agreed rates</h3><p>Add supplier rates on the supplier register before onboarding workers.</p></div>
         ) : (
@@ -170,7 +306,7 @@ export default function SupplierProfilePage() {
               <tbody>{workers.map(worker => (
                 <tr key={worker.id}>
                   <td><div style={{fontWeight:600}}>{worker.full_name}</div><div style={{fontSize:12,color:'var(--muted)'}}>{worker.worker_number}</div></td>
-                  <td>{worker.trade || worker.role || '-'}</td>
+                  <td>{worker.trade_role || worker.trade || worker.role || '-'}</td>
                   <td>{worker.hourly_rate ? `${formatCurrency(worker.hourly_rate)}/hr` : '-'}</td>
                   <td><StatusBadge label={worker.status || 'active'} tone={getStatusTone(worker.status || 'active')} /></td>
                   <td><Link className="btn btn-secondary btn-sm" href={`/workers/${worker.id}`}>Open</Link></td>
@@ -195,7 +331,7 @@ export default function SupplierProfilePage() {
               <tbody>{summaries.map(row => (
                 <tr key={row.id}>
                   <td>{fmtMonth(row.year, row.month)}</td>
-                  <td>{row.worker_count ?? '-'}</td>
+                  <td>{row.total_workers ?? row.worker_count ?? '-'}</td>
                   <td>{row.total_hours ?? '-'}</td>
                   <td>{row.total_amount != null ? formatCurrency(row.total_amount) : '-'}</td>
                   <td>{row.invoice_number || '-'}{row.invoice_amount ? <div style={{fontSize:12,color:'var(--muted)'}}>{formatCurrency(row.invoice_amount)}</div> : null}</td>

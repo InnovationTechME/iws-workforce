@@ -28,6 +28,23 @@ CREATE INDEX IF NOT EXISTS idx_timesheet_discrepancies_header_status
 CREATE INDEX IF NOT EXISTS idx_timesheet_discrepancies_worker
   ON timesheet_discrepancies(worker_id);
 
+GRANT SELECT, INSERT, UPDATE, DELETE ON timesheet_discrepancies TO anon, authenticated;
+
+ALTER TABLE timesheet_discrepancies ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "timesheet_discrepancies_read" ON timesheet_discrepancies;
+CREATE POLICY "timesheet_discrepancies_read"
+  ON timesheet_discrepancies FOR SELECT
+  TO public
+  USING (true);
+
+DROP POLICY IF EXISTS "timesheet_discrepancies_write" ON timesheet_discrepancies;
+CREATE POLICY "timesheet_discrepancies_write"
+  ON timesheet_discrepancies FOR ALL
+  TO public
+  USING (true)
+  WITH CHECK (true);
+
 CREATE OR REPLACE FUNCTION set_timesheet_discrepancies_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
