@@ -1,8 +1,11 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Sidebar from './Sidebar'
 import { supabase } from '../lib/supabaseClient'
 import { TODAY } from '../lib/utils'
+import { TIMESHEET_PENDING_STATUSES } from '../lib/inboxService'
+import { setRole } from '../lib/mockAuth'
 
 function withTimeout(promise, timeoutMs = 3500) {
   let timeoutId
@@ -14,8 +17,36 @@ function withTimeout(promise, timeoutMs = 3500) {
 
 export default function AppShell({ children, pageTitle }) {
   const [alertDots, setAlertDots] = useState({})
+  const [authChecked, setAuthChecked] = useState(false)
+  const router = useRouter()
 
   useEffect(() => {
+    let cancelled = false
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return
+      const session = data.session
+      if (!session) {
+        router.replace('/')
+        return
+      }
+      setRole(session.user?.app_metadata?.role || 'owner')
+      setAuthChecked(true)
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) router.replace('/')
+      else {
+        setRole(session.user?.app_metadata?.role || 'owner')
+        setAuthChecked(true)
+      }
+    })
+    return () => {
+      cancelled = true
+      listener?.subscription?.unsubscribe()
+    }
+  }, [router])
+
+  useEffect(() => {
+    if (!authChecked) return
     let cancelled = false
     async function loadAlertDots() {
       const today = TODAY
@@ -43,10 +74,10 @@ export default function AppShell({ children, pageTitle }) {
         count(supabase.from('certifications').select('id', { count: 'exact', head: true }).lt('expiry_date', today)),
         count(supabase.from('certifications').select('id', { count: 'exact', head: true }).gte('expiry_date', today).lte('expiry_date', in30)),
         count(supabase.from('warnings').select('id', { count: 'exact', head: true }).not('status', 'in', '("closed","resolved")')),
-        count(supabase.from('timesheet_headers').select('id', { count: 'exact', head: true }).or('hr_check_status.eq.pending,operations_check_status.eq.pending,final_approval_status.eq.pending,status.eq.pending')),
+        count(supabase.from('timesheet_headers').select('id', { count: 'exact', head: true }).in('status', TIMESHEET_PENDING_STATUSES)),
         count(supabase.from('attendance').select('id', { count: 'exact', head: true }).eq('date', today).in('reason', ['absent_no_cert', 'unauthorised_absence', 'absent'])),
         count(supabase.from('offboarding').select('id', { count: 'exact', head: true }).is('file_closed_at', null)),
-        count(supabase.from('attendance_conflicts').select('id', { count: 'exact', head: true }).eq('status', 'pending')),
+        count(supabase.from('timesheet_discrepancies').select('id', { count: 'exact', head: true }).eq('status', 'pending')),
       ])
 
       if (cancelled) return
@@ -66,7 +97,16 @@ export default function AppShell({ children, pageTitle }) {
     }
     loadAlertDots().catch(() => {})
     return () => { cancelled = true }
-  }, [])
+  }, [authChecked])
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    router.replace('/')
+  }
+
+  if (!authChecked) {
+    return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--muted)'}}>Checking secure session...</div>
+  }
 
   return (
     <div className="app-shell">
@@ -77,7 +117,7 @@ export default function AppShell({ children, pageTitle }) {
             <span className="topbar-title">{pageTitle}</span>
           </div>
           <div className="topbar-right">
-            <a href="/" className="btn btn-ghost btn-sm">Switch Role</a>
+            <button type="button" onClick={handleSignOut} className="btn btn-ghost btn-sm">Sign out</button>
           </div>
         </header>
         <main className="page-shell">{children}</main>

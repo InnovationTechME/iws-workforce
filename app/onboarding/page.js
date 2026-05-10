@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useMemo, useRef, Suspense } from 'react'
+import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
@@ -709,7 +710,7 @@ function WorkerForm({ track, form, setForm, formErrors, blacklistHit, onPassport
               <option value="">Select supplier</option>
               {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-            <div style={{fontSize:11,color:'var(--hint)',marginTop:4}}>Add the company first in <a href="/suppliers" style={{color:'var(--teal)',fontWeight:600}}>Suppliers</a>, then return here to onboard its workers.</div>
+            <div style={{fontSize:11,color:'var(--hint)',marginTop:4}}>Add the company first in <Link href="/suppliers" style={{color:'var(--teal)',fontWeight:600}}>Suppliers</Link>, then return here to onboard its workers.</div>
           </div>
           <div className="form-field"><label className="form-label">Supplier agreed trade/rate *</label>
             <select

@@ -4,9 +4,10 @@ import Link from 'next/link'
 import AppShell from '../../components/AppShell'
 import PageHeader from '../../components/PageHeader'
 import StatusBadge from '../../components/StatusBadge'
-import { getInboxItems, getDocumentsByWorker, getWorker, updateDocument, addDocument, getCertifications, updateCertification, checkNonReturnStatus } from '../../lib/mockStore'
-import { getTasks } from '../../lib/taskService'
-import { getInsuranceExpiryAlerts } from '../../lib/documentService'
+import { getDocumentsByWorker, upsertDocument } from '../../lib/documentService'
+import { getCertificationsByWorker, updateCertification } from '../../lib/certificationService'
+import { getWorkerById } from '../../lib/workerService'
+import { getLiveInbox } from '../../lib/inboxService'
 import { formatDate, getStatusTone } from '../../lib/utils'
 
 const CATEGORY_MAP = {
@@ -35,8 +36,10 @@ const EMPTY_INBOX = {
   openWarnings: [],
   pendingTimesheets: [],
   leaveRequests: [],
+  leaveNonReturn: [],
   pendingTasks: [],
   pendingDiscrepancies: [],
+  insuranceAlerts: [],
 }
 
 function normaliseInbox(value) {
@@ -116,11 +119,11 @@ export default function InboxPage() {
       setLoading(true)
       setLoadError(null)
       try {
-        setInbox(normaliseInbox(getInboxItems()))
-        const [rows, alerts] = await Promise.all([getTasks(), getInsuranceExpiryAlerts()])
+        const liveInbox = await getLiveInbox()
         if (!cancelled) {
-          setTasks(rows || [])
-          setInsuranceAlerts(alerts || [])
+          setInbox(normaliseInbox(liveInbox))
+          setTasks(liveInbox.pendingTasks || [])
+          setInsuranceAlerts(liveInbox.insuranceAlerts || [])
         }
       } catch (err) {
         if (!cancelled) setLoadError(err?.message || 'Failed to load inbox')
@@ -132,8 +135,12 @@ export default function InboxPage() {
   }, [])
 
   const refreshInbox = async () => {
-    setInbox(normaliseInbox(getInboxItems()))
-    try { setTasks(await getTasks()) } catch (err) { setLoadError(err?.message || 'Failed to refresh inbox') }
+    try {
+      const liveInbox = await getLiveInbox()
+      setInbox(normaliseInbox(liveInbox))
+      setTasks(liveInbox.pendingTasks || [])
+      setInsuranceAlerts(liveInbox.insuranceAlerts || [])
+    } catch (err) { setLoadError(err?.message || 'Failed to refresh inbox') }
   }
 
   const showSuccess = (msg) => {
@@ -150,11 +157,11 @@ export default function InboxPage() {
     setRenewIssuer('')
   }
 
-  const openDocDrawer = (workerId, docType, prefill) => {
-    const worker = getWorker(workerId)
-    const docs = getDocumentsByWorker(workerId)
-    let record = docs.find(d => d.document_type === docType)
-    if (!record) record = { worker_id: workerId, document_type: docType, status: 'missing', issue_date: null, expiry_date: null }
+  const openDocDrawer = async (workerId, docType, prefill) => {
+    const [worker, docs] = await Promise.all([getWorkerById(workerId), getDocumentsByWorker(workerId)])
+    let record = docs.find(d => d.doc_type === docType)
+    if (!record) record = { worker_id: workerId, doc_type: docType, document_type: docType, status: 'missing', issue_date: null, expiry_date: null }
+    record = { ...record, document_type: record.doc_type || record.document_type }
     setDrawerWorker(worker)
     setDrawerRecord(record)
     setDrawerType('document')
@@ -167,10 +174,10 @@ export default function InboxPage() {
     setDrawerOpen(true)
   }
 
-  const openCertDrawer = (workerId, certType) => {
-    const worker = getWorker(workerId)
-    const certs = getCertifications()
-    const record = certs.find(c => c.worker_id === workerId && c.certification_type === certType)
+  const openCertDrawer = async (workerId, certType) => {
+    const [worker, certs] = await Promise.all([getWorkerById(workerId), getCertificationsByWorker(workerId)])
+    const found = certs.find(c => c.worker_id === workerId && c.cert_type === certType)
+    const record = found ? { ...found, certification_type: found.cert_type } : null
     if (!record) return
     setDrawerWorker(worker)
     setDrawerRecord(record)
@@ -185,48 +192,43 @@ export default function InboxPage() {
     setDrawerOpen(true)
   }
 
-  const handleSaveDocument = () => {
+  const handleSaveDocument = async () => {
     if (!drawerForm.expiry_date) return
+    if (drawerForm.file) {
+      setLoadError('Use the Documents page to upload files so they are stored correctly.')
+      return
+    }
     const status = calcStatus(drawerForm.expiry_date)
-    const ext = drawerForm.file ? drawerForm.file.name.split('.').pop() : 'pdf'
-    const fileName = `${drawerWorker.worker_number}_${drawerWorker.full_name.replace(/\s+/g,'_')}_${drawerRecord.document_type}.${ext}`
     const payload = {
       issue_date: drawerForm.issue_date,
       expiry_date: drawerForm.expiry_date,
       notes: drawerForm.notes,
       status,
-      file_name: drawerForm.file ? fileName : (drawerRecord.file_name || null)
+      file_url: drawerRecord.file_url || null
     }
-    if (drawerRecord.id) {
-      updateDocument(drawerRecord.id, payload)
-    } else {
-      addDocument({
-        worker_id: drawerRecord.worker_id,
-        document_type: drawerRecord.document_type,
-        category: CATEGORY_MAP[drawerRecord.document_type] || 'personal',
-        ...payload
-      })
-    }
-    refreshInbox()
+    await upsertDocument(drawerRecord.worker_id, drawerRecord.document_type, payload)
+    await refreshInbox()
     const label = titleCase(drawerRecord.document_type)
     showSuccess(`\u2713 ${label} updated for ${drawerWorker.full_name}`)
     closeDrawer()
   }
 
-  const handleSaveCertification = () => {
+  const handleSaveCertification = async () => {
     if (!drawerForm.expiry_date) return
+    if (drawerForm.file) {
+      setLoadError('Use the Certifications page to upload files so they are stored correctly.')
+      return
+    }
     const status = calcStatus(drawerForm.expiry_date)
-    const ext = drawerForm.file ? drawerForm.file.name.split('.').pop() : 'pdf'
-    const fileName = drawerForm.file ? `${drawerWorker.worker_number}_${drawerWorker.full_name.replace(/\s+/g,'_')}_${drawerRecord.certification_type.replace(/\s+/g,'_')}.${ext}` : (drawerRecord.file_name || null)
-    updateCertification(drawerRecord.id, {
+    await updateCertification(drawerRecord.id, {
       issuer: renewIssuer,
       issue_date: drawerForm.issue_date,
       expiry_date: drawerForm.expiry_date,
-      file_name: fileName,
+      file_url: drawerRecord.file_url || null,
       renewal_required: false,
       status
     })
-    refreshInbox()
+    await refreshInbox()
     showSuccess(`\u2713 ${drawerRecord.certification_type} updated for ${drawerWorker.full_name}`)
     closeDrawer()
   }
@@ -253,9 +255,11 @@ export default function InboxPage() {
       <PageHeader eyebrow="HR Inbox" title="Daily follow-up queue" description="All active HR alerts consolidated in one place. Click any item to take action."
         meta={<StatusBadge label={`${total} total items`} tone={total > 0 ? 'danger' : 'success'} />} />
 
+      {loading && <div className="panel" style={{fontSize:13,color:'var(--muted)'}}>Loading inbox...</div>}
+      {loadError && <div className="notice danger">{loadError}</div>}
       {total === 0 && <div className="panel"><div className="empty-state"><h3>All clear — no HR follow-up items</h3><p>Great work. Everything is up to date.</p></div></div>}
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16}}>
+      <div className="responsive-grid responsive-grid-3" style={{gap:16}}>
         <InboxPanel title="Missing documents" items={missingDocs} tone="danger" linkHref="/documents" renderItem={d => <><div style={{flex:1}}><div style={{fontSize:12,fontWeight:500}}>{d.worker_name}</div><div style={{fontSize:10,color:'var(--hint)'}}>{d.worker_number} · {d.document_type}</div><div style={{fontSize:10,color:'var(--danger)',marginTop:2}}>📎 Upload document →</div></div><StatusBadge label="missing" tone="danger" /></>} />
         <InboxPanel title="Expired documents" items={expiredDocs} tone="danger" linkHref="/documents" renderItem={d => <><div style={{flex:1}}><div style={{fontSize:12,fontWeight:500}}>{d.worker_name}</div><div style={{fontSize:10,color:'var(--hint)'}}>{d.worker_number} · {d.document_type}</div><div style={{fontSize:10,color:'var(--danger)',marginTop:2}}>🔄 Upload renewal →</div></div><StatusBadge label="expired" tone="danger" /></>} />
         <InboxPanel title="Expiring documents" items={expiringDocs} tone="warning" linkHref="/documents" renderItem={d => <><div style={{flex:1}}><div style={{fontSize:12,fontWeight:500}}>{d.worker_name}</div><div style={{fontSize:10,color:'var(--hint)'}}>{d.worker_number} · {d.document_type}</div><div style={{fontSize:10,color:'var(--warning)',marginTop:2}}>⏰ Renew before expiry →</div></div></>} />
@@ -415,7 +419,7 @@ export default function InboxPage() {
     )})()}
 
     {/* Leave Non-Return Alerts */}
-    {(() => { const nrAlerts = checkNonReturnStatus(); return nrAlerts.length > 0 ? (
+    {(() => { const nrAlerts = safeInbox.leaveNonReturn || []; return nrAlerts.length > 0 ? (
       <div className="panel" style={{marginTop:16,border:'2px solid #fca5a5',background:'#fef2f2'}}>
         <div className="panel-header"><div><h2 style={{color:'#dc2626'}}>Leave Non-Return Alerts</h2><p>{nrAlerts.length} worker{nrAlerts.length!==1?'s':''} overdue</p></div></div>
         <div className="table-wrap"><table>

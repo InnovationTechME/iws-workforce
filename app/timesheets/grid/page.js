@@ -115,12 +115,11 @@ function TimesheetGridContent() {
     let hdr = headers?.[0]
     if (!hdr) {
       const clientName = clients.find(c => c.id === clientId)?.name || 'Unknown'
-      const { data: newHdr } = await supabase.from('timesheet_headers').insert({
+      hdr = {
         client_id: clientId, client_name: clientName, month, year,
         month_label: `${MONTH_NAMES[month - 1]} ${year}`,
-        status: 'draft', ramadan_mode: false, uploaded_by: role
-      }).select().single()
-      hdr = newHdr
+        status: 'uploaded', ramadan_mode: false, uploaded_by: role, _unsaved: true
+      }
     }
     setHeader(hdr)
     setRamadanMode(hdr?.ramadan_mode || false)
@@ -135,7 +134,7 @@ function TimesheetGridContent() {
     setReconciliationSummary(reconciliation || { pendingCount: 0, rows: [], headers: [], tableAvailable: true })
 
     // Load existing lines
-    if (hdr) {
+    if (hdr?.id) {
       const { data: lines } = await supabase.from('timesheet_lines').select('*').eq('header_id', hdr.id)
       const g = {}
       ;(lines || []).forEach(l => {
@@ -149,7 +148,26 @@ function TimesheetGridContent() {
     setLoading(false)
   }
 
-  const buildLineRow = useCallback((worker, day, value, extra = {}) => {
+  const ensureHeader = useCallback(async () => {
+    if (header?.id) return header
+    if (!clientId) return null
+    const clientName = clients.find(c => c.id === clientId)?.name || header?.client_name || 'Unknown'
+    const { data: newHdr, error } = await supabase.from('timesheet_headers').insert({
+      client_id: clientId,
+      client_name: clientName,
+      month,
+      year,
+      month_label: `${MONTH_NAMES[month - 1]} ${year}`,
+      status: 'uploaded',
+      ramadan_mode: ramadanMode,
+      uploaded_by: role
+    }).select().single()
+    if (error) throw error
+    setHeader(newHdr)
+    return newHdr
+  }, [clientId, clients, header, month, ramadanMode, role, year])
+
+  const buildLineRow = useCallback((worker, day, value, extra = {}, headerIdOverride = null) => {
     const dateStr = formatDateStr(day, month, year)
     const dayType = classifyDay(dateStr, worker.rest_day || 'sunday', holidays)
     const capped = capHours(value)
@@ -157,7 +175,7 @@ function TimesheetGridContent() {
     const isConflict = detectConflict(capped, dayType)
 
     return {
-      worker_id: worker.id, header_id: header.id, work_date: dateStr,
+      worker_id: worker.id, header_id: headerIdOverride || header.id, work_date: dateStr,
       total_hours: capped, normal_hours, ot_hours, holiday_hours,
       is_friday: new Date(dateStr + 'T00:00:00').getDay() === 5,
       is_rest_day: dayType === 'rest_day',
@@ -178,7 +196,18 @@ function TimesheetGridContent() {
     const key = `${workerId}_${day}`
     setCellStates(prev => ({ ...prev, [key]: 'saving' }))
 
-    const row = buildLineRow(worker, day, value, extra)
+    let activeHeader
+    try {
+      activeHeader = await ensureHeader()
+    } catch (error) {
+      setCellStates(prev => ({ ...prev, [key]: 'error' }))
+      return
+    }
+    if (!activeHeader?.id) {
+      setCellStates(prev => ({ ...prev, [key]: 'error' }))
+      return
+    }
+    const row = buildLineRow(worker, day, value, extra, activeHeader.id)
     const { error } = await supabase.from('timesheet_lines').upsert(row, { onConflict: 'worker_id,work_date,header_id' })
     if (error) {
       setCellStates(prev => ({ ...prev, [key]: 'error' }))
@@ -187,7 +216,7 @@ function TimesheetGridContent() {
       setCellStates(prev => ({ ...prev, [key]: 'saved' }))
       setTimeout(() => setCellStates(prev => { const n = { ...prev }; if (n[key] === 'saved') delete n[key]; return n }), 1500)
     }
-  }, [buildLineRow, header, locked, workers])
+  }, [buildLineRow, ensureHeader, header, locked, workers])
 
   const handleCellChange = useCallback((workerId, day, rawValue) => {
     const key = `${workerId}_${day}`
@@ -200,7 +229,7 @@ function TimesheetGridContent() {
 
   // Conflict resolution
   const resolveConflict = useCallback(async (workerId, day, resolution) => {
-    if (!header) return
+    if (!header?.id) return
     const key = `${workerId}_${day}`
     const dateStr = formatDateStr(day, month, year)
     const updates = {}
@@ -228,7 +257,7 @@ function TimesheetGridContent() {
   }, [header, month, year])
 
   const resolveSick = useCallback(async (workerId, day, ref) => {
-    if (!header || !ref.trim()) return
+    if (!header?.id || !ref.trim()) return
     const dateStr = formatDateStr(day, month, year)
     const key = `${workerId}_${day}`
     const { error } = await supabase.from('timesheet_lines')
@@ -241,7 +270,7 @@ function TimesheetGridContent() {
   }, [header, month, year])
 
   const resolveLeave = useCallback(async (workerId, day, leaveType) => {
-    if (!header) return
+    if (!header?.id) return
     const dateStr = formatDateStr(day, month, year)
     const key = `${workerId}_${day}`
     const { error } = await supabase.from('timesheet_lines')
@@ -262,7 +291,7 @@ function TimesheetGridContent() {
   // Toggle ramadan
   const toggleRamadan = async (val) => {
     setRamadanMode(val)
-    if (header) await supabase.from('timesheet_headers').update({ ramadan_mode: val }).eq('id', header.id)
+    if (header?.id) await supabase.from('timesheet_headers').update({ ramadan_mode: val }).eq('id', header.id)
   }
 
   // Conflict count
@@ -327,7 +356,7 @@ function TimesheetGridContent() {
     if (!clientId || !header || workers.length === 0 || conflictCount > 0 || (reconciliationSummary?.pendingCount || 0) > 0 || unsavedCount > 0) return
     const monthLabel = `${MONTH_NAMES[month - 1]} ${year}`
     // Approve header first
-    if (header) await supabase.from('timesheet_headers').update({ status: 'hr_approved' }).eq('id', header.id)
+    if (header?.id) await supabase.from('timesheet_headers').update({ status: 'hr_approved' }).eq('id', header.id)
     const { error } = await supabase.rpc('generate_payroll_batch', { p_month: month, p_year: year, p_month_label: monthLabel })
     if (error) { alert('Error: ' + error.message); return }
     router.push('/payroll-run')

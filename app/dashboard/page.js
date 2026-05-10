@@ -11,6 +11,7 @@ import { getPayrollBatches, getBatchesPendingApproval } from '../../lib/payrollS
 import { supabase } from '../../lib/supabaseClient'
 import { formatDate } from '../../lib/utils'
 import { getRole } from '../../lib/mockAuth'
+import { isPendingTimesheet } from '../../lib/inboxService'
 
 const emptyInbox = {
   missingDocs: [],
@@ -93,10 +94,7 @@ export default function DashboardPage() {
           const expected = row.expected_return_date || row.end_date
           return expected && expected < todayStr && ['approved', 'on_leave', 'departed'].includes(status)
         })
-        const pendingTimesheets = timesheetHeaders.filter(row => {
-          const statuses = [row.hr_check_status, row.operations_check_status, row.final_approval_status, row.status]
-          return statuses.some(status => String(status || '').toLowerCase() === 'pending')
-        })
+        const pendingTimesheets = timesheetHeaders.filter(isPendingTimesheet)
         const realInbox = {
           ...emptyInbox,
           missingDocs: (missingDocsRes.data || []).map(normaliseDoc),
@@ -192,7 +190,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',gap:12,marginBottom:20}}>
+      <div className="responsive-grid responsive-grid-dashboard" style={{gap:12,marginBottom:20}}>
         <div style={{background:'linear-gradient(135deg,#1d4ed8,#2563eb)',borderRadius:12,padding:'20px 24px',color:'white',cursor:'pointer'}} onClick={()=>router.push('/workers')}>
           <div style={{fontSize:11,fontWeight:600,opacity:0.8,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:4}}>Today&apos;s Site Workforce</div>
           <div style={{fontSize:48,fontWeight:800,lineHeight:1}}>{metrics.siteWorkforce || 0}</div>
@@ -297,7 +295,7 @@ export default function DashboardPage() {
 
       <div style={{marginBottom:8}}>
         <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:10}}>Action Queue — Priority Order</div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
+        <div className="responsive-grid responsive-grid-4" style={{gap:10}}>
           {alertCards.map(card => {
             const ts = toneStyles[card.tone] || toneStyles.info
             const isUrgent = card.value > 0 && card.tone === 'danger'
@@ -320,7 +318,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginTop:16}}>
+      <div className="responsive-grid responsive-grid-2" style={{gap:16,marginTop:16}}>
         <div className="panel">
           <div className="panel-header"><div><h2>⚠ Expired documents</h2><p>Click any row to open document</p></div></div>
           {inbox.expiredDocs?.length === 0

@@ -546,7 +546,7 @@ export default function PayrollRunPage() {
       </div>
 
       {/* Payment split */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:20}}>
+      <div className="responsive-grid responsive-grid-3" style={{gap:12,marginBottom:20}}>
         {[['🏦 WPS — C3 Card',totals.wpsTotal,'#0d9488','#f0fdfa','Via Endered/C3 platform'],['💵 Non-WPS',totals.nonWpsTotal,'#d97706','#fffbeb','C3 Card (Non-WPS)'],['⚠ Cash (Pending C3)',totals.cashTotal,'#dc2626','#fef2f2','C3 card not yet activated']].map(([label,amount,color,bg,sub]) => (<div key={label} style={{background:bg,border:`1.5px solid ${color}30`,borderRadius:10,padding:'14px 16px'}}>
           <div style={{fontSize:11,fontWeight:600,color,marginBottom:6,textTransform:'uppercase',letterSpacing:0.5}}>{label}</div>
           <div style={{fontSize:20,fontWeight:700,color,marginBottom:4}}>AED {amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
@@ -618,7 +618,7 @@ export default function PayrollRunPage() {
       {/* Add adjustment panel */}
       {showAdjPanel && (<div className="panel" style={{marginBottom:20,border:'2px solid #0d9488'}}>
         <div className="panel-header"><h2>Add Adjustment</h2><button className="btn btn-ghost btn-sm" onClick={() => setShowAdjPanel(false)}>✕</button></div>
-        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 2fr 1fr auto',gap:12,alignItems:'flex-end'}}>
+        <div className="responsive-grid responsive-grid-payroll-adjustment" style={{gap:12,alignItems:'flex-end'}}>
           <div className="form-field"><label className="form-label">Worker *</label><select className="form-select" value={adjForm.worker_id} onChange={e=>setAdjForm({...adjForm,worker_id:e.target.value})}><option value="">Select worker</option>{workers.map(w=><option key={w.id} value={w.id}>{w.full_name} ({w.worker_number})</option>)}</select></div>
           <div className="form-field"><label className="form-label">Type *</label><select className="form-select" value={adjForm.type} onChange={e=>setAdjForm({...adjForm,type:e.target.value})}><option value="deduction">Deduction</option><option value="allowance">Allowance / Bonus</option><option value="advance">Advance Recovery</option></select></div>
           <div className="form-field"><label className="form-label">Label / Reason *</label><input className="form-input" placeholder="e.g. Advance recovery" value={adjForm.label} onChange={e=>setAdjForm({...adjForm,label:e.target.value})} /></div>
@@ -898,15 +898,34 @@ export default function PayrollRunPage() {
         return
       }
       try {
-        const XLSX = (await import('xlsx'))
+        const ExcelJSModule = await import('exceljs')
+        const ExcelJS = ExcelJSModule.default || ExcelJSModule
         const wpsData = payrollLines.filter(l=>l.payment_method==='WPS'||!l.payment_method).map(l=>{const w=l.worker||{};const isHourly=isHourlyPayrollLine(l);return {'IT Employee ID':l.worker_number||w.worker_number,'Full Name':l.worker_name||w.full_name,'Category':w.category,'Pay Type':isHourly?'Hourly Rate':'Monthly Salary','Basic / Rate':isHourly?l.rate_used:l.basic_salary,'Total Hours':l.total_hours||'','Allowances':l.allowances_total,'OT1 Pay':l.ot1_pay,'OT2 Pay':l.ot2_pay,'Gross Pay':l.gross_pay,'Deductions':l.deductions_total,'Net Pay':l.net_pay,'Payment Method':'WPS — C3 Card (Endered)'}})
         const nonWpsData = payrollLines.filter(l=>l.payment_method==='Non-WPS'||l.payment_method==='Cash').map(l=>{const w=l.worker||{};return {'IT Employee ID':l.worker_number||w.worker_number,'Full Name':l.worker_name||w.full_name,'Gross Pay':l.gross_pay,'Deductions':l.deductions_total,'Net Pay':l.net_pay,'Payment':l.payment_method}})
         const summaryData = [{'Section':'GRAND TOTAL','Amount':totals.totalNet,'WPS/Non-WPS':`WPS: AED ${totals.wpsTotal.toLocaleString()} | Non-WPS: AED ${totals.nonWpsTotal.toLocaleString()} | Cash: AED ${totals.cashTotal.toLocaleString()}`,'Workers':totals.workerCount}]
-        const wb = XLSX.utils.book_new()
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(wpsData),'WPS Workers')
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(nonWpsData.length>0?nonWpsData:[{Note:'No Non-WPS workers'}]),'Non-WPS')
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(summaryData),'Summary')
-        XLSX.writeFile(wb,`Innovation_Payroll_${batchLabel.replace(/\s+/g,'_')}.xlsx`)
+        const workbook = new ExcelJS.Workbook()
+        const addJsonSheet = (name, rows) => {
+          const sheet = workbook.addWorksheet(name)
+          const sourceRows = rows.length > 0 ? rows : [{ Note: 'No rows' }]
+          const headers = Object.keys(sourceRows[0])
+          sheet.addRow(headers)
+          sourceRows.forEach(row => sheet.addRow(headers.map(header => row[header] ?? '')))
+          sheet.getRow(1).font = { bold: true }
+          sheet.columns = headers.map(header => ({ header, width: Math.max(12, Math.min(32, header.length + 4)) }))
+        }
+        addJsonSheet('WPS Workers', wpsData)
+        addJsonSheet('Non-WPS', nonWpsData.length>0?nonWpsData:[{Note:'No Non-WPS workers'}])
+        addJsonSheet('Summary', summaryData)
+        const buffer = await workbook.xlsx.writeBuffer()
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `Innovation_Payroll_${batchLabel.replace(/\s+/g,'_')}.xlsx`
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        URL.revokeObjectURL(url)
       } catch (err) {
         console.error('[WPS Excel] failed', err)
         alert(`WPS Excel download failed:\n\n${err?.message || err}\n\nCheck browser console (F12) for full stack trace.`)
@@ -1031,9 +1050,9 @@ export default function PayrollRunPage() {
 
   return (<>
     <AppShell pageTitle="Payroll Run">
-      <div style={{display:'flex',gap:0,minHeight:'calc(100vh - 60px)',margin:'-24px'}}>
+      <div className="payroll-run-layout" style={{display:'flex',gap:0,minHeight:'calc(100vh - 60px)',margin:'-24px'}}>
         {/* Sidebar */}
-        <div style={{width:260,minWidth:260,background:'white',borderRight:'1px solid #e2e8f0',display:'flex',flexDirection:'column',position:'sticky',top:0,height:'100vh',overflowY:'auto',zIndex:10}}>
+        <div className="payroll-run-sidebar" style={{width:260,minWidth:260,background:'white',borderRight:'1px solid #e2e8f0',display:'flex',flexDirection:'column',position:'sticky',top:0,height:'100vh',overflowY:'auto',zIndex:10}}>
           <div style={{background:'#0f172a',padding:16}}>
             <div style={{fontSize:11,color:'#94a3b8',fontWeight:600,letterSpacing:1,textTransform:'uppercase',marginBottom:8}}>Payroll Period</div>
             <select className="form-select" style={{background:'#1e293b',color:'white',border:'1px solid #334155',fontSize:13}} value={selectedMonth&&selectedYear?`${selectedMonth}-${selectedYear}`:''} onChange={e => handlePeriodChange(e.target.value)}>
@@ -1073,7 +1092,7 @@ export default function PayrollRunPage() {
         </div>
 
         {/* Main content */}
-        <div style={{flex:1,padding:24,overflowY:'auto',background:'#f8fafc',minWidth:0}}>
+        <div className="payroll-run-main" style={{flex:1,padding:24,overflowY:'auto',background:'#f8fafc',minWidth:0}}>
           {successMsg&&<div style={{background:'#dcfce7',border:'1px solid #86efac',borderRadius:8,padding:'12px 16px',marginBottom:16,fontWeight:500,color:'#16a34a',fontSize:13}}>✓ {successMsg}</div>}
           {errorMsg&&<div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:'12px 16px',marginBottom:16,fontWeight:500,color:'#dc2626',fontSize:13}}>✕ {errorMsg}</div>}
           {currentStep===1&&<Step1TimesheetReview />}

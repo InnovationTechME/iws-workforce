@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { getRole, canAccess } from '../lib/mockAuth'
+import { supabase } from '../lib/supabaseClient'
 
 const navSections = [
   { title:'MAIN', items:[
@@ -60,6 +61,10 @@ export default function Sidebar({ alertDots = {} }) {
   }, [pathname])
 
   const roleLabel = role === 'owner' ? 'Management' : role === 'hr_admin' ? 'HR Admin' : role === 'accounts' ? 'Accounts' : 'Operations'
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    window.location.href = '/'
+  }
 
   return (
     <aside className="sidebar">
@@ -101,7 +106,7 @@ export default function Sidebar({ alertDots = {} }) {
       </nav>
       <div className="sidebar-footer">
         {mounted && <div className="sidebar-footer-user">Logged in as {roleLabel}</div>}
-        <Link href="/">Switch Role</Link>
+        <button type="button" onClick={handleSignOut} style={{border:0,background:'transparent',padding:0,fontSize:12,color:'var(--teal)',cursor:'pointer'}}>Sign out</button>
       </div>
     </aside>
   )

@@ -168,12 +168,35 @@ tr:hover td { background: #fafcff; }
 .step.active .step-num { background: var(--teal); border-color: var(--teal); color: white; }
 .step-line { flex: 1; height: 1px; background: var(--border); margin: 0 6px; min-width: 16px; }
 
+.responsive-grid { display: grid; }
+.responsive-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.responsive-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.responsive-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.responsive-grid-dashboard { grid-template-columns: 2fr 1fr 1fr 1fr; }
+.responsive-grid-payroll-adjustment { grid-template-columns: 2fr 1fr 2fr 1fr auto; }
+
 @media (max-width: 768px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { display: none; }
   .summary-strip { grid-template-columns: repeat(2, 1fr); }
   .form-grid, .form-grid-3 { grid-template-columns: 1fr; }
   .page-shell { padding: 16px; }
+  .page-header { flex-direction: column; align-items: stretch; }
+  .panel { padding: 16px; border-radius: 10px; }
+  .panel-header { flex-direction: column; }
+  .toolbar, .page-actions, .topbar-right { width: 100%; }
+  .search-input, .filter-select, .form-select, .btn { min-width: 0; max-width: 100%; }
+  .responsive-grid,
+  .responsive-grid-2,
+  .responsive-grid-3,
+  .responsive-grid-4,
+  .responsive-grid-dashboard,
+  .responsive-grid-payroll-adjustment { grid-template-columns: 1fr !important; }
+  .metric-row { gap: 10px; align-items: flex-start; }
+  .drawer { width: 100vw; }
+  .payroll-run-layout { flex-direction: column; margin: -16px !important; min-height: auto !important; }
+  .payroll-run-sidebar { width: 100% !important; min-width: 0 !important; height: auto !important; max-height: none !important; position: relative !important; border-right: none !important; border-bottom: 1px solid var(--border); }
+  .payroll-run-main { padding: 16px !important; overflow: visible !important; }
 }
 
 @media print {
