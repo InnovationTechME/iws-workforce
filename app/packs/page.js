@@ -13,6 +13,7 @@ import { formatDate, getStatusTone } from '../../lib/utils'
 import { listPastExperience } from '../../lib/workExperienceService'
 import { getWorkerPhotoDataUrl } from '../../lib/workerPhotoService'
 import { LOGO_BASE64 } from '../../lib/logoBase64'
+import { getSignedUrl } from '../../lib/storageService'
 
 // Normalise `worker.entry_track` for records that pre-date the §5.3.5
 // invariant (some legacy rows only have `category`). Keeps
@@ -93,6 +94,55 @@ function ddmmyyyy(d) {
   const mm = String(dt.getMonth() + 1).padStart(2,'0')
   const yy = dt.getFullYear()
   return `${dd}${mm}${yy}`
+}
+
+function storageRefs(value) {
+  if (!value) return []
+  if (String(value).trim().startsWith('[')) {
+    try {
+      const refs = JSON.parse(value)
+      if (Array.isArray(refs)) return refs.filter(Boolean)
+    } catch {
+      return [value]
+    }
+  }
+  return [value]
+}
+
+function docStorageRefs(doc) {
+  const refs = []
+  storageRefs(doc?.file_url).forEach((ref, i) => refs.push({ ref, suffix: i ? `file_${i + 1}` : 'file' }))
+  storageRefs(doc?.front_file_url).forEach(ref => refs.push({ ref, suffix: 'front' }))
+  storageRefs(doc?.back_file_url).forEach(ref => refs.push({ ref, suffix: 'back' }))
+  return refs
+}
+
+function safeFilePart(value) {
+  return String(value || '')
+    .replace(/\s+/g, '_')
+    .replace(/[^A-Za-z0-9_-]/g, '')
+}
+
+function extensionFromRef(ref, contentType) {
+  const path = String(ref || '').split('?')[0].split('::').pop()
+  const match = path.match(/\.([A-Za-z0-9]{2,5})$/)
+  if (match) return match[1].toLowerCase()
+  if (contentType?.includes('pdf')) return 'pdf'
+  if (contentType?.includes('png')) return 'png'
+  if (contentType?.includes('jpeg')) return 'jpg'
+  if (contentType?.includes('image')) return 'img'
+  return 'bin'
+}
+
+async function addStorageRefToZip(folder, ref, zipNameBase) {
+  const signedUrl = await getSignedUrl(ref)
+  if (!signedUrl) throw new Error(`Could not create a signed URL for ${zipNameBase}`)
+  const response = await fetch(signedUrl)
+  if (!response.ok) throw new Error(`Could not download ${zipNameBase}: HTTP ${response.status}`)
+  const blob = await response.blob()
+  const ext = extensionFromRef(ref, blob.type)
+  folder.file(`${zipNameBase}.${ext}`, blob)
+  return `${zipNameBase}.${ext}`
 }
 
 export default function PacksPage() {
@@ -201,26 +251,32 @@ export default function PacksPage() {
       // Auto-include every `in_pack` doc per the worker's template.
       const inPackTemplate = getDocumentTemplate(selectedWorker).filter(t => t.in_pack)
       const autoIncluded = []
-      inPackTemplate.forEach((t, idx) => {
+      let fileIndex = 1
+      for (const t of inPackTemplate) {
         const d = workerDocs.find(x => x.doc_type === t.doc_type)
-        if (d && (d.file_url || d.front_file_url)) {
-          const fileName = `${selectedWorker.worker_number}_${safeName}_${t.doc_type}.pdf`
-          const mockContent = `[MOCK FILE - DOCUMENT]\n\nWorker: ${selectedWorker.full_name}\nID: ${selectedWorker.worker_number}\nDocument: ${t.label}\nFile: ${fileName}\nGenerated: ${new Date().toISOString()}`
-          folder.file(`${String(idx+1).padStart(2,'0')}_${fileName}`, mockContent)
-          autoIncluded.push({ name: fileName, label: t.label })
+        const refs = docStorageRefs(d)
+        for (const { ref, suffix } of refs) {
+          const nameBase = `${String(fileIndex).padStart(2,'0')}_${selectedWorker.worker_number}_${safeName}_${safeFilePart(t.doc_type)}_${suffix}`
+          const zipName = await addStorageRefToZip(folder, ref, nameBase)
+          autoIncluded.push({ name: zipName, label: refs.length > 1 ? `${t.label} (${suffix})` : t.label })
+          fileIndex += 1
         }
-      })
+      }
 
       const optionalItems = workerCerts
         .filter(c => selectedDocIds.includes(c.id))
-        .map(c => ({ id:c.id, name: `${selectedWorker.worker_number}_${safeName}_${c.certification_type.replace(/\s+/g,'_')}.pdf`, item: c }))
+        .map(c => ({ id:c.id, name: `${selectedWorker.worker_number}_${safeName}_${safeFilePart(c.cert_type || c.certification_type || 'certification')}`, item: c }))
 
-      optionalItems.forEach((item, i) => {
-        const mockContent = `[MOCK FILE - CERTIFICATION]\n\nWorker: ${selectedWorker.full_name}\nID: ${selectedWorker.worker_number}\nCertification: ${item.item.certification_type}\nGenerated: ${new Date().toISOString()}`
-        folder.file(`${String(autoIncluded.length + i + 1).padStart(2,'0')}_${item.name}`, mockContent)
-      })
+      for (const item of optionalItems) {
+        const refs = storageRefs(item.item.file_url)
+        for (const ref of refs) {
+          const zipName = await addStorageRefToZip(folder, ref, `${String(fileIndex).padStart(2,'0')}_${item.name}`)
+          item.zipName = zipName
+          fileIndex += 1
+        }
+      }
 
-      const manifest = `WORKER DOCUMENT PACK MANIFEST\n${'='.repeat(40)}\nWorker: ${selectedWorker.full_name}\nID: ${selectedWorker.worker_number}\nGenerated: ${new Date().toLocaleString()}\nBy: Innovation Technologies LLC O.P.C.\n\nSTANDARD DOCUMENTS (auto-included):\n00. Cover Page (auto-generated HTML)\n${autoIncluded.map((a,i)=>`${String(i+1).padStart(2,'0')}. ${a.label} \u2014 ${a.name}`).join('\n')}\n\nADDITIONAL CERTIFICATIONS:\n${optionalItems.length ? optionalItems.map((o,i)=>`${String(autoIncluded.length+i+1).padStart(2,'0')}. ${o.item.certification_type} \u2014 ${o.name}`).join('\n') : '(none selected)'}\n`
+      const manifest = `WORKER DOCUMENT PACK MANIFEST\n${'='.repeat(40)}\nWorker: ${selectedWorker.full_name}\nID: ${selectedWorker.worker_number}\nGenerated: ${new Date().toLocaleString()}\nBy: Innovation Technologies LLC O.P.C.\n\nSTANDARD DOCUMENTS (auto-included):\n00. Cover Page (auto-generated HTML)\n${autoIncluded.map((a,i)=>`${String(i+1).padStart(2,'0')}. ${a.label} - ${a.name}`).join('\n')}\n\nADDITIONAL CERTIFICATIONS:\n${optionalItems.length ? optionalItems.map((o,i)=>`${String(autoIncluded.length+i+1).padStart(2,'0')}. ${o.item.cert_type || o.item.certification_type} - ${o.zipName || o.name}`).join('\n') : '(none selected)'}\n`
       folder.file('_PACK_MANIFEST.txt', manifest)
 
       const blob = await zip.generateAsync({type:'blob'})
@@ -347,7 +403,7 @@ export default function PacksPage() {
                         <label key={c.id} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0',borderBottom:'1px solid var(--border)',cursor:'pointer'}}>
                           <input type="checkbox" checked={selectedDocIds.includes(c.id)} onChange={()=>toggleDoc(c.id)} />
                           <div style={{flex:1}}>
-                            <div style={{fontSize:12,fontWeight:500}}>{c.certification_type}</div>
+                            <div style={{fontSize:12,fontWeight:500}}>{c.cert_type || c.certification_type}</div>
                             <div style={{fontSize:10,color:'var(--hint)'}}>{c.file_name||'No file uploaded'}</div>
                           </div>
                           <StatusBadge label={c.status} tone={c.status==='valid'?'success':c.status==='expired'?'danger':'warning'} />
@@ -483,7 +539,7 @@ export default function PacksPage() {
                       const b = statusBadge(c.status)
                       return (
                         <div key={i} style={{display:'inline-flex',alignItems:'center',gap:6,background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:20,padding:'5px 12px',fontSize:11}}>
-                          <span style={{fontWeight:600,color:'#334155'}}>{c.certification_type}</span>
+                          <span style={{fontWeight:600,color:'#334155'}}>{c.cert_type || c.certification_type}</span>
                           <span style={{color:'#94a3b8'}}>{c.expiry_date ? formatDate(c.expiry_date) : ''}</span>
                           <span style={{width:7,height:7,borderRadius:'50%',background:b.color,flexShrink:0}} />
                         </div>

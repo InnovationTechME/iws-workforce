@@ -16,6 +16,7 @@ import { getRole } from '../../lib/mockAuth'
 import { buildWaLink, starterKey, STARTERS } from '../../lib/whatsappTemplates'
 import { classifyDay } from '../../lib/dateUtils'
 import { getPendingDiscrepanciesByPeriod } from '../../lib/timesheetDiscrepancyService'
+import { addDeliveryLog } from '../../lib/deliveryService'
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const HOURLY_PAYROLL_TYPES = new Set(['hourly', 'flat_hourly'])
@@ -87,6 +88,7 @@ export default function PayrollRunPage() {
   const [deleting, setDeleting] = useState(false)
   const [zipping, setZipping] = useState(false)
   const [pdfWorker, setPdfWorker] = useState(null)
+  const [deliveryBusy, setDeliveryBusy] = useState(null)
   // Selected month/year for batch generation
   const [selectedMonth, setSelectedMonth] = useState(null)
   const [selectedYear, setSelectedYear] = useState(null)
@@ -95,6 +97,31 @@ export default function PayrollRunPage() {
 
   const showSuccess = (msg) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(null), 3000) }
   const showError = (msg) => { setErrorMsg(msg); setTimeout(() => setErrorMsg(null), 5000) }
+  const recordPayslipDelivery = async (line, method = 'manual') => {
+    const worker = line.worker || {}
+    const busyKey = `${line.id}-${method}`
+    setDeliveryBusy(busyKey)
+    try {
+      await addDeliveryLog({
+        worker_id: line.worker_id || worker.id || null,
+        worker_number: line.worker_number || worker.worker_number || '',
+        worker_name: line.worker_name || worker.full_name || '',
+        delivery_type: 'payslip',
+        linked_table: 'payroll_lines',
+        linked_record_id: line.id,
+        method,
+        recipient: method === 'whatsapp' ? worker.whatsapp_number : worker.email || worker.whatsapp_number || '',
+        status: 'sent',
+        sent_by: getRole(),
+        notes: selectedBatch?.month_label || '',
+      })
+      showSuccess('Payslip delivery recorded')
+    } catch (err) {
+      showError(err.message || 'Could not record delivery')
+    } finally {
+      setDeliveryBusy(null)
+    }
+  }
 
   const isHoliday = useCallback((dateStr) => holidays.some(h => h.date === dateStr), [holidays])
   const getHolidayName = useCallback((dateStr) => holidays.find(h => h.date === dateStr)?.name || '', [holidays])
@@ -121,31 +148,37 @@ export default function PayrollRunPage() {
       setPayrollLines(lines)
       const adjs = await getAdjustmentsByBatch(batch.id)
       setPayrollAdjustments(adjs)
+      let nextStep = 1
       // Restore step state from batch status
       if (batch.status === 'calculated' || batch.status === 'ops_approved' || batch.status === 'owner_approved' || batch.status === 'locked') {
         setStep1Confirmed(true)
         setStepStatus(prev => ({...prev, 1:'complete', 2:'complete'}))
         setStep2Confirmed(true)
+        nextStep = 2
       }
       // calculated + ops pending → Step 3
       if (batch.status === 'calculated' && batch.ops_approval_status === 'pending') {
         setStepStatus(prev => ({...prev, 2:'complete', 3:'active'}))
+        nextStep = 3
       }
       // calculated + ops rejected → Step 2 with rejection banner
       if (batch.status === 'calculated' && batch.ops_approval_status === 'rejected') {
         setOpsRejected(true)
         setOpsRejectionNote(batch.ops_rejection_reason || '')
         setStepStatus(prev => ({...prev, 2:'active', 3:'error'}))
+        nextStep = 2
       }
       // ops_approved + owner pending → Step 4
       if (batch.status === 'ops_approved' && batch.owner_approval_status === 'pending') {
         setStep3Approved(true)
         setStepStatus(prev => ({...prev, 3:'complete', 4:'active'}))
+        nextStep = 4
       }
       // owner_approved + owner pending (post-unlock) → Step 4
       if (batch.status === 'owner_approved' && batch.owner_approval_status === 'pending') {
         setStep3Approved(true)
         setStepStatus(prev => ({...prev, 3:'complete', 4:'active'}))
+        nextStep = 4
       }
       // ops_approved + owner rejected → Step 4 with rejection banner
       if (batch.status === 'ops_approved' && batch.owner_approval_status === 'rejected') {
@@ -153,13 +186,16 @@ export default function PayrollRunPage() {
         setOwnerRejected(true)
         setOwnerRejectionNote(batch.owner_rejection_reason || '')
         setStepStatus(prev => ({...prev, 3:'complete', 4:'error'}))
+        nextStep = 4
       }
       // locked → Step 5
       if (batch.status === 'locked') {
         setStep3Approved(true)
         setStep4Approved(true)
         setStepStatus(prev => ({...prev, 3:'complete', 4:'complete', 5:'active'}))
+        nextStep = 5
       }
+      setCurrentStep(nextStep)
     } catch (err) {
       console.error('loadBatchData error:', err)
       showError('Failed to load batch data')
@@ -458,8 +494,9 @@ export default function PayrollRunPage() {
               const totalHrs = workerLines.reduce((s,l) => s+Number(l.total_hours||0),0)
               const normalHrs = workerLines.reduce((s,l) => s+Number(l.normal_hours||0),0)
               const otHrs = workerLines.reduce((s,l) => s+Number(l.ot_hours||0),0)
-              const isFlat = worker.category==='Contract Worker'||worker.category==='Subcontract Worker'
-              const grossPay = isFlat ? totalHrs * Number(worker.hourly_rate||0) : Number(worker.monthly_salary||0)
+              const isSupplierWorker = worker.category === 'Subcontract Worker'
+              const isFlat = worker.category === 'Contract Worker'
+              const grossPay = isSupplierWorker ? 0 : isFlat ? totalHrs * Number(worker.hourly_rate || 0) : Number(worker.monthly_salary || 0)
 
               return (
                 <tr key={worker.id} style={{background:workerIdx%2===0?'white':'#fafafa',borderTop:workerIdx>0?'1px solid #f1f5f9':'none'}}>
@@ -469,7 +506,7 @@ export default function PayrollRunPage() {
                   </td>
                   <td style={{position:'sticky',left:132,zIndex:2,background:workerIdx%2===0?'white':'#fafafa',padding:'6px',borderRight:'1px solid #e2e8f0',fontSize:10,color:'#334155'}}>{worker.trade_role}</td>
                   <td style={{position:'sticky',left:214,zIndex:2,background:workerIdx%2===0?'white':'#fafafa',padding:'4px',textAlign:'center',borderRight:'2px solid #cbd5e1',fontSize:9,color:'#64748b'}}>
-                    {isFlat ? `${worker.hourly_rate}/h` : 'Salary'}
+                    {isSupplierWorker ? 'Supplier' : isFlat ? `${worker.hourly_rate}/h` : 'Salary'}
                   </td>
                   {dayMeta.map(dm => {
                     const hrs = getIWSHours(worker.id,dm.dateStr)
@@ -480,7 +517,7 @@ export default function PayrollRunPage() {
                   <td style={{textAlign:'right',padding:'8px 6px',fontWeight:700,fontSize:11,borderLeft:'2px solid #cbd5e1'}}>{totalHrs||'—'}h</td>
                   <td style={{textAlign:'right',padding:'8px 6px',fontSize:11,color:'#64748b'}}>{normalHrs||'—'}h</td>
                   <td style={{textAlign:'right',padding:'8px 6px',fontSize:11,color:otHrs>0?'#d97706':'#cbd5e1',fontWeight:otHrs>0?600:400}}>{otHrs>0?`${otHrs}h`:'—'}</td>
-                  <td style={{textAlign:'right',padding:'8px 8px',fontSize:11,fontWeight:700,color:'#0d9488'}}>{grossPay>0?`AED ${Math.round(grossPay).toLocaleString()}`:'—'}</td>
+                  <td style={{textAlign:'right',padding:'8px 8px',fontSize:11,fontWeight:700,color:isSupplierWorker?'#64748b':'#0d9488'}}>{isSupplierWorker ? 'Supplier invoice' : grossPay>0?`AED ${Math.round(grossPay).toLocaleString()}`:'—'}</td>
                 </tr>
               )
             })}
@@ -496,7 +533,7 @@ export default function PayrollRunPage() {
                 const gT=filteredWorkers.reduce((s,w)=>s+allLines.filter(l=>l.worker_id===w.id).reduce((a,l)=>a+Number(l.total_hours||0),0),0)
                 const gN=filteredWorkers.reduce((s,w)=>s+allLines.filter(l=>l.worker_id===w.id).reduce((a,l)=>a+Number(l.normal_hours||0),0),0)
                 const gOT=filteredWorkers.reduce((s,w)=>s+allLines.filter(l=>l.worker_id===w.id).reduce((a,l)=>a+Number(l.ot_hours||0),0),0)
-                const gGross=filteredWorkers.reduce((s,w)=>{const ls=allLines.filter(l=>l.worker_id===w.id);const t=ls.reduce((a,l)=>a+Number(l.total_hours||0),0);const f=w.category==='Contract Worker'||w.category==='Subcontract Worker';if(f)return s+t*Number(w.hourly_rate||0);return s+Number(w.monthly_salary||0)},0)
+                const gGross=filteredWorkers.reduce((s,w)=>{if(w.category==='Subcontract Worker')return s;const ls=allLines.filter(l=>l.worker_id===w.id);const t=ls.reduce((a,l)=>a+Number(l.total_hours||0),0);const f=w.category==='Contract Worker';if(f)return s+t*Number(w.hourly_rate||0);return s+Number(w.monthly_salary||0)},0)
                 return (<>
                   <td style={{textAlign:'right',padding:'10px 6px',fontWeight:700,color:'white',borderLeft:'2px solid #334155'}}>{gT}h</td>
                   <td style={{textAlign:'right',padding:'10px 6px',color:'#94a3b8'}}>{gN}h</td>
@@ -565,7 +602,7 @@ export default function PayrollRunPage() {
           </div>
         </div>
         <div className="table-wrap"><table>
-          <thead><tr><th>Worker</th><th>Category</th><th>Payment</th><th style={{textAlign:'right'}}>Rate / Salary</th><th style={{textAlign:'right'}}>Hours</th><th style={{textAlign:'right'}}>OT Pay</th><th style={{textAlign:'right'}}>Allowances</th><th style={{textAlign:'right'}}>Gross Pay</th><th style={{textAlign:'right'}}>Net Pay</th></tr></thead>
+          <thead><tr><th>Worker</th><th>Category</th><th>Payment</th><th style={{textAlign:'right'}}>Rate / Salary</th><th style={{textAlign:'right'}}>Hours</th><th style={{textAlign:'right'}}>OT Pay</th><th style={{textAlign:'right'}}>Allowances</th><th style={{textAlign:'right'}}>Gross Pay</th><th style={{textAlign:'right'}}>Deductions</th><th style={{textAlign:'right'}}>Net Pay</th></tr></thead>
           <tbody>
             {payrollLines.map(line => {
               const w = line.worker || {}
@@ -581,9 +618,10 @@ export default function PayrollRunPage() {
                   <td style={{textAlign:'right',fontSize:12,color:Number(line.ot1_pay||0)+Number(line.ot2_pay||0)>0?'#d97706':'#cbd5e1'}}>{Number(line.ot1_pay||0)+Number(line.ot2_pay||0)>0?`AED ${(Number(line.ot1_pay||0)+Number(line.ot2_pay||0)).toLocaleString()}`:'—'}</td>
                   <td style={{textAlign:'right',fontSize:12,color:Number(line.allowances_total||0)>0?'#16a34a':'#cbd5e1'}}>{Number(line.allowances_total||0)>0?`AED ${Number(line.allowances_total).toLocaleString()}`:'—'}</td>
                   <td style={{textAlign:'right',fontSize:12,fontWeight:600}}>AED {Number(line.gross_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                  <td style={{textAlign:'right',fontSize:12,color:Number(line.deductions_total||0)>0?'#dc2626':'#cbd5e1'}}>{Number(line.deductions_total||0)>0?`-AED ${Number(line.deductions_total).toLocaleString(undefined,{minimumFractionDigits:2})}`:'—'}</td>
                   <td style={{textAlign:'right',fontSize:13,fontWeight:700,color:'#0d9488'}}>AED {Number(line.net_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
                 </tr>
-                {isExp && (<tr><td colSpan={9} style={{padding:0,background:'#f0fdfa',borderBottom:'2px solid #0d9488'}}>
+                {isExp && (<tr><td colSpan={10} style={{padding:0,background:'#f0fdfa',borderBottom:'2px solid #0d9488'}}>
                   <div style={{padding:'16px 20px',display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
                     <div>
                       <div style={{fontSize:11,fontWeight:700,color:'#0d9488',textTransform:'uppercase',letterSpacing:1,marginBottom:10}}>Earnings Breakdown</div>
@@ -603,7 +641,13 @@ export default function PayrollRunPage() {
                     <div>
                       <div style={{fontSize:11,fontWeight:700,color:'#dc2626',textTransform:'uppercase',letterSpacing:1,marginBottom:10}}>Deductions</div>
                       {Number(line.deductions_total||0) === 0 ? <div style={{fontSize:12,color:'#94a3b8',fontStyle:'italic'}}>No deductions this period</div> : (
-                        <div style={{display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:700,color:'#dc2626'}}><span>Total Deductions</span><span>-AED {Number(line.deductions_total).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
+                        <>
+                          {Number(line.nwnp_deduction||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'#dc2626'}}><span>No work / no pay absence</span><span>-AED {Number(line.nwnp_deduction).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
+                          {Number(line.penalty_deductions||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'#dc2626'}}><span>Warning / penalty deductions</span><span>-AED {Number(line.penalty_deductions).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
+                          {Number(line.iloe_deduction||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'#dc2626'}}><span>ILOE deduction</span><span>-AED {Number(line.iloe_deduction).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
+                          {Number(line.other_deductions||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'#dc2626'}}><span>Other deductions</span><span>-AED {Number(line.other_deductions).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
+                          <div style={{display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:700,color:'#dc2626',borderTop:'1px solid #fecaca',paddingTop:8,marginTop:8}}><span>Total Deductions</span><span>-AED {Number(line.deductions_total).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
+                        </>
                       )}
                       <div style={{background:'#0f172a',color:'white',borderRadius:8,padding:'12px 14px',marginTop:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{fontSize:13,fontWeight:700}}>NET PAY</span><span style={{fontSize:16,fontWeight:800,color:'#5eead4'}}>AED {Number(line.net_pay||0).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
                     </div>
@@ -1007,6 +1051,7 @@ export default function PayrollRunPage() {
                       try {
                         const { downloadPayslipPDF } = await import('../../lib/payslipPDF')
                         await downloadPayslipPDF(w, line, selectedBatch)
+                        await recordPayslipDelivery(line, 'download')
                       } catch (err) {
                         console.error('[Payslip PDF] failed for', w.worker_number, err)
                         alert(`Payslip PDF failed for ${w.full_name || w.worker_number}:\n\n${err?.message || err}\n\nCheck browser console (F12) for full stack trace.`)
@@ -1017,8 +1062,9 @@ export default function PayrollRunPage() {
                     const netStr = Number(line.net_pay || 0).toLocaleString(undefined, {minimumFractionDigits: 2})
                     const sk = starterKey('payslip', w.preferred_language || 'en')
                     const waUrl = buildWaLink(w.whatsapp_number, sk, { month: monthLabel, net: netStr })
-                    return waUrl ? <a href={waUrl} target="_blank" rel="noreferrer" style={{background:'#25d366',color:'white',border:'none',borderRadius:4,padding:'2px 6px',fontSize:10,fontWeight:600,textDecoration:'none',marginLeft:4}}>WhatsApp</a> : null
+                    return waUrl ? <a href={waUrl} target="_blank" rel="noreferrer" onClick={() => recordPayslipDelivery(line, 'whatsapp')} style={{background:'#25d366',color:'white',border:'none',borderRadius:4,padding:'2px 6px',fontSize:10,fontWeight:600,textDecoration:'none',marginLeft:4}}>WhatsApp</a> : null
                   })()}
+                  <button className="btn btn-secondary btn-sm" disabled={deliveryBusy === `${line.id}-manual`} onClick={() => recordPayslipDelivery(line, 'manual')}>{deliveryBusy === `${line.id}-manual` ? 'Saving...' : 'Log Sent'}</button>
                 </td>
               </tr>)
             })}

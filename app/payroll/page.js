@@ -230,7 +230,7 @@ export default function PayrollPage() {
             ))}
           </div>
           <div className="table-wrap"><table>
-            <thead><tr><th>Worker</th><th>Type</th><th>Payment</th><th style={{textAlign:'right'}}>Rate / Salary</th><th style={{textAlign:'right'}}>Hours</th><th style={{textAlign:'right'}}>OT Pay</th><th style={{textAlign:'right'}}>Allowances</th><th style={{textAlign:'right'}}>Gross</th><th style={{textAlign:'right'}}>Net pay</th></tr></thead>
+            <thead><tr><th>Worker</th><th>Type</th><th>Payment</th><th style={{textAlign:'right'}}>Rate / Salary</th><th style={{textAlign:'right'}}>Hours</th><th style={{textAlign:'right'}}>OT Pay</th><th style={{textAlign:'right'}}>Allowances</th><th style={{textAlign:'right'}}>Gross</th><th style={{textAlign:'right'}}>Deductions</th><th style={{textAlign:'right'}}>Net pay</th></tr></thead>
             <tbody>
               {filtered.map(l => {
                 const w = l.worker || {}
@@ -245,6 +245,7 @@ export default function PayrollPage() {
                   <td style={{textAlign:'right',fontSize:12,color:'var(--success)'}}>{Number(l.ot1_pay||0)+Number(l.ot2_pay||0)>0 ? formatCurrency(Number(l.ot1_pay||0)+Number(l.ot2_pay||0)) : '—'}</td>
                   <td style={{textAlign:'right',fontSize:12,color:'var(--success)'}}>{Number(l.allowances_total||0)>0 ? formatCurrency(l.allowances_total) : '—'}</td>
                   <td style={{textAlign:'right',fontSize:12}}>{formatCurrency(l.gross_pay)}</td>
+                  <td style={{textAlign:'right',fontSize:12,color:Number(l.deductions_total||0)>0?'var(--danger)':'var(--hint)'}}>{Number(l.deductions_total||0)>0 ? `-${formatCurrency(l.deductions_total)}` : '—'}</td>
                   <td style={{textAlign:'right',fontSize:13,fontWeight:600,color:'var(--teal)'}}>{formatCurrency(l.net_pay)}</td>
                 </tr>)
               })}
@@ -279,7 +280,11 @@ export default function PayrollPage() {
 
               {Number(selected.deductions_total||0)>0 && (<>
                 <div style={{fontSize:11,fontWeight:700,color:'var(--danger)',textTransform:'uppercase',letterSpacing:1,marginTop:16,marginBottom:10}}>Deductions</div>
-                <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'var(--danger)'}}><span>Total Deductions</span><span>-{formatCurrency(selected.deductions_total)}</span></div>
+                {Number(selected.nwnp_deduction||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'var(--danger)'}}><span>No work / no pay absence</span><span>-{formatCurrency(selected.nwnp_deduction)}</span></div>}
+                {Number(selected.penalty_deductions||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'var(--danger)'}}><span>Warning / penalty deductions</span><span>-{formatCurrency(selected.penalty_deductions)}</span></div>}
+                {Number(selected.iloe_deduction||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'var(--danger)'}}><span>ILOE deduction</span><span>-{formatCurrency(selected.iloe_deduction)}</span></div>}
+                {Number(selected.other_deductions||0)>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4,color:'var(--danger)'}}><span>Other deductions</span><span>-{formatCurrency(selected.other_deductions)}</span></div>}
+                <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginTop:8,paddingTop:8,borderTop:'1px solid #fecaca',fontWeight:700,color:'var(--danger)'}}><span>Total Deductions</span><span>-{formatCurrency(selected.deductions_total)}</span></div>
               </>)}
 
               <div style={{background:'#0f172a',color:'white',borderRadius:8,padding:'12px 14px',marginTop:16,display:'flex',justifyContent:'space-between',alignItems:'center'}}>

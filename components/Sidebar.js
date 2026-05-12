@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabaseClient'
 const navSections = [
   { title:'MAIN', items:[
     { href:'/dashboard', label:'Dashboard', module:'dashboard' },
+    { href:'/setup', label:'Start Here', module:'setup' },
     { href:'/reports', label:'Reports & Stats', module:'reports' },
   ]},
   { title:'WORKER LIFECYCLE', items:[
@@ -39,6 +40,11 @@ const navSections = [
   ]},
   { title:'OTHER', items:[
     { href:'/approvals', label:'Pending Approvals', module:'approvals' },
+    { href:'/delivery-log', label:'Delivery Log', module:'delivery-log' },
+    { href:'/audit-log', label:'Audit Log', module:'audit-log' },
+    { href:'/trash', label:'Trash & Restore', module:'trash' },
+    { href:'/instructions', label:'Instructions & Backup', module:'instructions' },
+    { href:'/workflow-map', label:'A3 Workflow Map', module:'workflow-map' },
   ]},
 ]
 

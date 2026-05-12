@@ -8,6 +8,10 @@
     "start": "next start",
     "lint": "next lint",
     "data:audit": "node scripts/auditDemoData.mjs",
+    "data:backup": "node scripts/exportOperationalBackup.mjs",
+    "data:backup:files": "node scripts/exportOperationalBackup.mjs --storage-files",
+    "data:import-suppliers": "node scripts/importSupplierCompanies.mjs",
+    "data:import-workers": "node scripts/importExistingWorkers.mjs",
     "data:seed-demo": "node scripts/seedDemoLifecycle.mjs",
     "data:reset-plan": "node scripts/resetOperationalData.mjs",
     "data:reset-operational": "node scripts/resetOperationalData.mjs --all-operational"

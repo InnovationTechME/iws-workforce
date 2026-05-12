@@ -39,6 +39,8 @@ const suspiciousText = [
   'asas',
   '222',
   'Supplier Company',
+  'Supplier Assignment Pending',
+  'PENDING-SUPPLIER-REVIEW',
 ]
 
 function textLooksDemo(value) {
@@ -81,6 +83,7 @@ const documents = documentsResult.rows
 const headers = headersResult.rows
 const offboarding = offboardingResult.rows
 const payrollBatches = payrollResult.rows
+const supplierById = new Map(suppliers.map(row => [row.id, row]))
 
 const demoWorkers = workers.filter(row => {
   const name = row.full_name || `${row.first_name || ''} ${row.last_name || ''}`
@@ -91,6 +94,12 @@ const demoWorkers = workers.filter(row => {
 const supplierWorkerIssues = workers.filter(row =>
   row.category === 'Subcontract Worker' && !row.supplier_id
 )
+
+const invalidSupplierAssignments = workers.filter(row => {
+  if (row.category !== 'Subcontract Worker' || !row.supplier_id) return false
+  const supplier = supplierById.get(row.supplier_id)
+  return !supplier || supplier.active === false || textLooksDemo(supplier.name) || textLooksDemo(supplier.po_number)
+})
 
 const demoSuppliers = suppliers.filter(row =>
   row.name?.startsWith('DEMO-') || rowLooksDemo(row, ['name', 'po_number', 'notes'])
@@ -106,6 +115,7 @@ const demoHeaders = headers.filter(row =>
 
 printSection('Likely demo/test workers', demoWorkers, ['worker_number', 'full_name', 'status', 'category', 'entry_track'])
 printSection('Subcontract workers missing supplier_id', supplierWorkerIssues, ['worker_number', 'full_name', 'status', 'category', 'entry_track'])
+printSection('Subcontract workers assigned to inactive/demo supplier', invalidSupplierAssignments, ['worker_number', 'full_name', 'status', 'category', 'entry_track'])
 printSection('Likely demo/test suppliers', demoSuppliers, ['name', 'po_number', 'active'])
 printSection('Likely demo/test documents', demoDocuments, ['doc_type', 'label', 'status', 'file_url'])
 printSection('Likely demo/test timesheet headers', demoHeaders, ['client_name', 'month_label', 'status'])

@@ -21,6 +21,8 @@ import { getAttendanceByWorker } from '../../../lib/attendanceService'
 import { formatCurrency, formatDate, getStatusTone } from '../../../lib/utils'
 import { offerLetterHTML, warningLetterHTML, experienceLetterHTML, terminationWithNoticeHTML, terminationWithoutNoticeHTML, resignationAcceptanceHTML, policyManualHTML, TERMINATION_GROUNDS_LIST } from '../../../lib/letterTemplates'
 import { buildWaLink, starterKey } from '../../../lib/whatsappTemplates'
+import { addDeliveryLog } from '../../../lib/deliveryService'
+import { getRole } from '../../../lib/mockAuth'
 
 function nextWarningTypeFromRows(rows = []) {
   const count = rows.filter(row => String(row.warning_type || '').toLowerCase() === 'warning').length
@@ -59,6 +61,7 @@ export default function WorkerDetailPage() {
   const [pdfBusy, setPdfBusy] = useState(null)
   const [editingWhatsApp, setEditingWhatsApp] = useState(false)
   const [whatsAppDraft, setWhatsAppDraft] = useState('')
+  const [deliveryBusy, setDeliveryBusy] = useState(null)
 
   const handleView = async (fileRef) => {
     if (!fileRef) return
@@ -143,6 +146,32 @@ export default function WorkerDetailPage() {
   const recordLetter = async (letter) => {
     await addLetter(letter)
     setLetters(await getLettersByWorker(worker.id))
+  }
+  const recordDelivery = async ({ delivery_type, linked_table, linked_record_id, method = 'manual', recipient = '', notes = '' }) => {
+    const busyKey = `${delivery_type}-${linked_record_id || method}`
+    setDeliveryBusy(busyKey)
+    try {
+      await addDeliveryLog({
+        worker_id: worker.id,
+        worker_number: worker.worker_number,
+        worker_name: worker.full_name,
+        delivery_type,
+        linked_table,
+        linked_record_id,
+        method,
+        recipient,
+        status: 'sent',
+        sent_by: getRole(),
+        notes,
+      })
+      setSaveBanner('Delivery recorded')
+      setTimeout(() => setSaveBanner(null), 3000)
+    } catch (err) {
+      setSaveBanner(`Delivery log failed: ${err.message || err}`)
+      setTimeout(() => setSaveBanner(null), 5000)
+    } finally {
+      setDeliveryBusy(null)
+    }
   }
 
   const tenureText = (() => {
@@ -687,14 +716,15 @@ export default function WorkerDetailPage() {
         {tab === 'warnings' && (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Type</th><th>Date</th><th>Reason</th><th>Status</th></tr></thead>
+              <thead><tr><th>Type</th><th>Date</th><th>Reason</th><th>Status</th><th>Delivery</th></tr></thead>
               <tbody>
-                {warnings.length === 0 ? <tr><td colSpan={4} style={{textAlign:'center',color:'var(--hint)',padding:32}}>No warnings recorded</td></tr> : warnings.map(w => (
+                {warnings.length === 0 ? <tr><td colSpan={5} style={{textAlign:'center',color:'var(--hint)',padding:32}}>No warnings recorded</td></tr> : warnings.map(w => (
                   <tr key={w.id}>
                     <td><StatusBadge label={w.warning_type} tone={w.warning_type==='warning'?'danger':'neutral'} /></td>
                     <td style={{fontSize:12,color:'var(--muted)'}}>{formatDate(w.issue_date)}</td>
                     <td style={{fontSize:13}}>{w.reason}</td>
                     <td><StatusBadge label={w.status} tone={getStatusTone(w.status)} /></td>
+                    <td><button className="btn btn-secondary btn-sm" disabled={deliveryBusy === `warning-${w.id}`} onClick={() => recordDelivery({ delivery_type:'warning', linked_table:'warnings', linked_record_id:w.id, method:'manual', notes:w.reason || '' })}>{deliveryBusy === `warning-${w.id}` ? 'Saving...' : 'Log Sent'}</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -815,6 +845,7 @@ export default function WorkerDetailPage() {
                               else if (l.letter_type === 'policy_manual') html = policyManualHTML(worker, l.ref_number, l.issued_date)
                               setViewerHtml(html); setViewerRef(l.ref_number)
                             }}>View</button>
+                            <button className="btn btn-secondary btn-sm" disabled={deliveryBusy === `letter-${l.id}`} onClick={() => recordDelivery({ delivery_type:'letter', linked_table:'letters', linked_record_id:l.id, method:'manual', notes:l.ref_number })}>{deliveryBusy === `letter-${l.id}` ? 'Saving...' : 'Log Sent'}</button>
                           </td>
                         </tr>
                       )
@@ -837,7 +868,7 @@ export default function WorkerDetailPage() {
             {payslipRows.length > 0 && (
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>Month</th><th style={{textAlign:'right'}}>Gross</th><th style={{textAlign:'right'}}>Net Pay</th><th>Payment</th><th>Status</th><th style={{width:60}}>PDF</th></tr></thead>
+                  <thead><tr><th>Month</th><th style={{textAlign:'right'}}>Gross</th><th style={{textAlign:'right'}}>Net Pay</th><th>Payment</th><th>Status</th><th style={{width:60}}>PDF</th><th>Delivery</th></tr></thead>
                   <tbody>
                     {payslipRows.map(row => {
                       const batch = row.payroll_batches || {}
@@ -859,6 +890,7 @@ export default function WorkerDetailPage() {
                                 } finally { setPdfBusy(null) }
                               }}>{pdfBusy === row.id ? '...' : '📄 PDF'}</button>
                           </td>
+                          <td><button className="btn btn-secondary btn-sm" disabled={deliveryBusy === `payslip-${row.id}`} onClick={() => recordDelivery({ delivery_type:'payslip', linked_table:'payroll_lines', linked_record_id:row.id, method:'manual', recipient:worker.whatsapp_number || worker.email || '', notes:batch.month_label || '' })}>{deliveryBusy === `payslip-${row.id}` ? 'Saving...' : 'Log Sent'}</button></td>
                         </tr>
                       )
                     })}

@@ -1,0 +1,2 @@
+name,trade_speciality,contact_person,email,phone,address,po_number,po_value,po_start_date,po_end_date,payment_terms,first_trade_role,first_hourly_rate,first_effective_from,notes
+Example Supplier LLC,Scaffolding and Access,Contact Name,ops@example.com,+971500000000,Abu Dhabi,PO-2026-001,100000,2026-01-01,2026-12-31,30 days,Scaffolder,22,2026-01-01,Replace this row with real supplier data

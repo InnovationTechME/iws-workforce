@@ -1,0 +1,2 @@
+worker_number,doc_type,label,issue_date,expiry_date,status,file_name,notes
+IWS-2025-0001,passport,Passport Copy,2024-01-01,2028-12-31,valid,passport.pdf,Upload actual files through worker profile after worker import
